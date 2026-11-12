@@ -1,0 +1,34 @@
+{# Polled every 2 s. data-latest-run lets the page reload itself when a new analysis finishes. #}
+<div class="stages" data-latest-run="{{ latest_run_id or '' }}"
+     data-active="{{ '1' if stages|selectattr('active')|list else '0' }}">
+  {% for st in stages %}
+    {% set j = st.job %}{% set a = st.artifact %}
+    <div class="stage">
+      <div class="stage-name">{{ st.label }}</div>
+      {% if j and j.status in ('queued', 'running') %}
+        <span class="status status-{{ j.status }}">{{ JOB_STATUS_LABELS[j.status] }}</span>
+        <div class="progress"><div class="bar status-{{ j.status }}" style="width: {{ j.progress }}%"></div></div>
+        <span class="small muted">{{ j.progress|round(1) }}%</span>
+      {% elif j and j.status == 'failed' %}
+        <span class="status status-failed">falhou</span>
+        <div class="small error-text">{{ j.error }}</div>
+        <button class="btn small" hx-post="/jobs/{{ j.id }}/tentar-de-novo" hx-swap="none">Tentar de novo</button>
+      {% elif j and j.status == 'canceled' %}
+        <span class="status status-canceled">cancelado</span>
+      {% elif a and a.status == 'skipped' %}
+        <span class="status check-warn">pulado</span>
+        <div class="small muted">{{ a.message }}</div>
+      {% elif a %}
+        <span class="status status-done">ok</span>
+        <div class="small muted">
+          {% if st.elapsed is not none %}{{ st.elapsed|duration }}{% elif a.elapsed_seconds is not none %}{{ a.elapsed_seconds|duration }}{% endif %}
+          {% if st.stage == 'transcribe' and a.summary.words is defined %}· {{ a.summary.words }} palavras · {{ a.summary.language }}{% if a.summary.realtime_factor %} · {{ a.summary.realtime_factor }}x tempo real{% endif %}{% endif %}
+          {% if st.stage == 'fetch_chat' and a.summary.messages is defined %}· {{ a.summary.messages }} mensagens{% endif %}
+          {% if st.stage == 'detect' and a.summary.candidates is defined %}· {{ a.summary.candidates }} candidatos{% endif %}
+        </div>
+      {% else %}
+        <span class="status status-pending">—</span>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>

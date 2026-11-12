@@ -1,0 +1,50 @@
+{% set s = c.eff_start %}{% set e = c.eff_end %}
+<article class="cand status-{{ c.status }}" id="cand-{{ c.id }}" data-id="{{ c.id }}">
+  <div class="cand-head">
+    <span class="rank">#{{ c.rank }}</span>
+    <span class="score" title="Nota final (0 a 100)">{{ c.score|round|int }}</span>
+    <strong>{{ s|hms }}</strong>
+    <span class="muted small">{{ (e - s)|round(1) }} s{% if c.user_start is not none %} · ajustado{% endif %}</span>
+    {% if c.status == 'approved' %}<span class="badge ok">aprovado</span>{% elif c.status == 'rejected' %}<span class="badge fail">rejeitado</span>{% endif %}
+    {% if fb %}<span class="badge {{ 'ok' if fb.verdict == 'bom' else 'fail' }}">{{ fb.verdict }}</span>{% endif %}
+  </div>
+  {% if card_error %}<div class="flash error small">{{ card_error }}</div>{% endif %}
+  <div class="cand-body">
+    <video class="clip-player" controls preload="none" playsinline
+           data-start="{{ s }}" data-end="{{ e }}"
+           src="/fontes/{{ source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(e) }}"></video>
+    <div class="cand-info">
+      <div class="breakdown">
+        {% for k in signals %}{% set v = c.breakdown.get(k) %}
+        <div class="bd-row">
+          <span class="bd-label">{{ signal_labels[k] }}</span>
+          <span class="bd-bar"><span class="bd-fill bd-{{ k }}" style="width: {{ v or 0 }}%"></span></span>
+          <span class="bd-val small">{{ v|round|int if v is not none else '—' }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="snippet">{{ c.transcript_snippet or '(sem fala transcrita neste trecho)' }}</p>
+      <div class="cand-actions">
+        <button class="btn small {{ 'on-ok' if fb and fb.verdict == 'bom' }}" hx-post="/candidatos/{{ c.id }}/feedback" hx-vals='{"verdict": "bom"}' hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">👍 Bom</button>
+        <button class="btn small {{ 'on-fail' if fb and fb.verdict == 'ruim' }}" hx-post="/candidatos/{{ c.id }}/feedback" hx-vals='{"verdict": "ruim"}' hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">👎 Ruim</button>
+        <button class="btn small {{ 'on-ok' if c.status == 'approved' }}" hx-post="/candidatos/{{ c.id }}/status" hx-vals='{"status": "approved"}' hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">Aprovar</button>
+        <button class="btn small {{ 'on-fail' if c.status == 'rejected' }}" hx-post="/candidatos/{{ c.id }}/status" hx-vals='{"status": "rejected"}' hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">Rejeitar</button>
+      </div>
+      <form class="adjust" hx-post="/candidatos/{{ c.id }}/ajuste" hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">
+        <label>Início (s)
+          <span class="nudge"><button type="button" class="btn small" data-nudge="start" data-d="-1">−1</button>
+          <input name="user_start" value="{{ '%.2f'|format(s) }}" inputmode="decimal">
+          <button type="button" class="btn small" data-nudge="start" data-d="1">+1</button></span>
+        </label>
+        <label>Fim (s)
+          <span class="nudge"><button type="button" class="btn small" data-nudge="end" data-d="-1">−1</button>
+          <input name="user_end" value="{{ '%.2f'|format(e) }}" inputmode="decimal">
+          <button type="button" class="btn small" data-nudge="end" data-d="1">+1</button></span>
+        </label>
+        <button type="button" class="btn small" data-preview>Prévia</button>
+        <button class="btn small primary">Salvar ajuste</button>
+        {% if c.user_start is not none %}<button class="btn small" name="reset" value="1">Voltar ao sugerido</button>{% endif %}
+      </form>
+    </div>
+  </div>
+</article>

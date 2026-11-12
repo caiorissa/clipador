@@ -14,7 +14,7 @@ from sqlmodel import Session
 
 from clipador.config import Settings
 from clipador.models import PLATFORM_LABELS, JobStatus, Platform, SourceKind, SourceStatus
-from clipador.utils import format_duration
+from clipador.utils import format_duration, format_hms
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -37,6 +37,8 @@ JOB_TYPE_LABELS = {
     "transcribe": "Transcrição",
     "detect": "Detecção",
     "render": "Renderização",
+    "extract_audio": "Extrair áudio",
+    "fetch_chat": "Chat",
 }
 KIND_LABELS = {SourceKind.VOD: "VOD", SourceKind.CLIP: "Clip"}
 
@@ -57,6 +59,7 @@ def _platform_label(value: str) -> str:
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["duration"] = format_duration
 templates.env.filters["dt"] = _dt
+templates.env.filters["hms"] = format_hms
 templates.env.filters["platform_label"] = _platform_label
 templates.env.globals.update(
     SOURCE_STATUS_LABELS=SOURCE_STATUS_LABELS,

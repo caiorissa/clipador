@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from clipador.config import Settings, get_settings
 from clipador.db import make_engine, run_migrations
 from clipador.web.deps import STATIC_DIR
-from clipador.web.routes import jobs, sources, streamers, system
+from clipador.web.routes import analysis, jobs, sources, streamers, system
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -21,7 +21,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = make_engine(settings)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    for module in (streamers, sources, jobs, system):
+    for module in (streamers, sources, analysis, jobs, system):  # sources before analysis
         app.include_router(module.router)
 
     @app.get("/", include_in_schema=False)

@@ -53,6 +53,16 @@ def format_duration(seconds: float | None) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+def format_hms(seconds: float | None) -> str:
+    """Always HH:MM:SS (timestamps in a long VOD)."""
+    if seconds is None:
+        return "—"
+    total = max(0, int(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
 def tail_lines(text: str, max_lines: int) -> str:
     lines = text.splitlines()
     return "\n".join(lines[-max_lines:])

@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}{{ source.title or ('Fonte #%d' % source.id) }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+
+<div class="page-head">
+  <div>
+    <h1>{{ source.title or source.url }}</h1>
+    <div class="small muted">
+      <span class="badge platform-{{ source.platform }}">{{ source.platform|platform_label }}</span>
+      #{{ source.id }} · {{ source.streamer.display_name if source.streamer }} · {{ source.duration_seconds|duration }}
+      {% if source.start_offset is not none or source.end_offset is not none %}
+        · trecho {{ source.start_offset|hms if source.start_offset is not none else 'início' }}–{{ source.end_offset|hms if source.end_offset is not none else 'fim' }}
+      {% endif %}
+    </div>
+  </div>
+  <div class="head-actions">
+    <a class="btn" href="/fontes">← Fontes</a>
+    <form method="post" action="/fontes/{{ source.id }}/analisar" class="inline">
+      <button class="btn primary" {{ 'disabled' if source.status != 'ready' }}>Analisar</button>
+    </form>
+  </div>
+</div>
+{% if source.status != 'ready' %}<div class="flash">A fonte ainda não está pronta ({{ SOURCE_STATUS_LABELS.get(source.status, source.status) }}). Espere o download terminar.</div>{% endif %}
+
+<section class="card">
+  <h2>Etapas</h2>
+  <div id="stages" hx-get="/fontes/{{ source.id }}/estagios" hx-trigger="every 2s" hx-swap="innerHTML">
+    {% include "analysis/_stages.html" %}
+  </div>
+</section>
+
+{% if run %}
+  {% if not run.has_chat %}
+    <div class="flash warn">Sem dados de chat: nota calculada só com áudio e fala.</div>
+  {% endif %}
+
+  <section class="card">
+    <div class="page-head compact">
+      <h2>Linha do tempo</h2>
+      <form method="get" class="inline-form">
+        <select name="run" onchange="this.form.submit()" aria-label="Análise">
+          {% for r in runs %}
+            <option value="{{ r.id }}" {{ 'selected' if r.id == run.id }}>Análise #{{ r.id }} · {{ presets.get(r.params.candidates.preset, r.params.candidates.preset) }} · {{ r.candidate_count }} cand. · {{ r.created_at|dt }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+    <div id="timeline" class="timeline"></div>
+    <div id="markers" class="markers" aria-label="Candidatos na linha do tempo"></div>
+    <div class="legend small muted">
+      <span class="lg lg-interest"></span> interesse
+      <span class="lg lg-audio"></span> áudio
+      {% if run.has_chat %}<span class="lg lg-chat"></span> chat{% endif %}
+      · clique num marcador para ir ao candidato
+    </div>
+  </section>
+
+  <div class="analysis-grid">
+    <section>
+      <h2>Candidatos ({{ candidates|length }})</h2>
+      {% if not candidates %}<div class="empty">Nenhum candidato. Tente baixar a altura mínima dos picos ou mudar o preset.</div>{% endif %}
+      <div class="cand-list">
+        {% for c, fb in candidates %}{% include "analysis/_candidate.html" %}{% endfor %}
+      </div>
+    </section>
+
+    <aside class="card tuning">
+      <h2>Ajustes da detecção</h2>
+      {% set cp = params.candidates %}
+      <form method="post" action="/fontes/{{ source.id }}/reanalisar" id="tuning">
+        <label>Preset
+          <select name="preset" id="preset">
+            {% for key, label in presets.items() %}<option value="{{ key }}" {{ 'selected' if key == cp.preset }}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" name="custom_weights" id="custom_weights" {{ 'checked' if cp.weights != preset_weights.get(cp.preset) }}> Pesos personalizados</label>
+        {% for k in signals %}
+        <label class="slider">{{ signal_labels[k] }} <output id="o_{{ k }}">{{ cp.weights[k] }}</output>
+          <input type="range" name="w_{{ k }}" min="0" max="3" step="0.1" value="{{ cp.weights[k] }}" data-weight="{{ k }}">
+        </label>
+        {% endfor %}
+        <div class="grid2">
+          <label>Contexto antes (s)<input name="context_before_s" value="{{ cp.context_before_s }}" inputmode="decimal"></label>
+          <label>Depois do pico (s)<input name="tail_after_s" value="{{ cp.tail_after_s }}" inputmode="decimal"></label>
+          <label>Duração mín. (s)<input name="min_duration_s" value="{{ cp.min_duration_s }}" inputmode="decimal"></label>
+          <label>Duração máx. (s)<input name="max_duration_s" value="{{ cp.max_duration_s }}" inputmode="decimal"></label>
+          <label>Nº de candidatos<input name="num_candidates" value="{{ cp.num_candidates }}" inputmode="numeric"></label>
+        </div>
+        <button class="btn primary">Reanalisar</button>
+        <p class="small muted">Reanalisar roda só a detecção (usa a transcrição e as features em cache): leva segundos.</p>
+      </form>
+    </aside>
+  </div>
+{% else %}
+  <div class="empty">Esta fonte ainda não foi analisada. Clique em <strong>Analisar</strong>: extrai o áudio, transcreve na GPU, baixa o chat (se houver) e detecta os momentos.</div>
+{% endif %}
+
+<script>
+(function () {
+  const CURRENT_RUN = {{ (run.id if run else 'null') }};
+  const PINNED = {{ 'true' if pinned_run else 'false' }};
+  const PRESETS = {{ preset_weights|tojson }};
+
+  // Reload when a new analysis finishes (unless the user picked an older run).
+  document.body.addEventListener("htmx:afterSwap", (ev) => {
+    if (ev.target.id !== "stages") return;
+    const box = ev.target.querySelector(".stages");
+    if (!box || box.dataset.active === "1" || PINNED) return;
+    const latest = box.dataset.latestRun ? Number(box.dataset.latestRun) : null;
+    if (latest && latest !== CURRENT_RUN) location.reload();
+  });
+
+  // --- players: stay inside [start, end] ---
+  function wirePlayer(v) {
+    if (v.dataset.wired) return;
+    v.dataset.wired = "1";
+    v.addEventListener("play", () => {
+      const s = Number(v.dataset.start), e = Number(v.dataset.end);
+      if (v.currentTime < s - 0.3 || v.currentTime >= e - 0.05) v.currentTime = s;
+    });
+    v.addEventListener("timeupdate", () => {
+      if (v.currentTime >= Number(v.dataset.end)) { v.pause(); v.currentTime = Number(v.dataset.end); }
+    });
+  }
+  function wireAll(root) { root.querySelectorAll("video.clip-player").forEach(wirePlayer); }
+  wireAll(document);
+  document.body.addEventListener("htmx:afterSwap", (ev) => wireAll(ev.target.parentElement || document));
+
+  // --- ± buttons and preview on the adjust form ---
+  document.body.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-nudge],[data-preview]");
+    if (!b) return;
+    const card = b.closest(".cand"), form = card.querySelector("form.adjust"), v = card.querySelector("video");
+    if (b.dataset.nudge) {
+      const input = form.querySelector(b.dataset.nudge === "start" ? "[name=user_start]" : "[name=user_end]");
+      input.value = Math.max(0, Number(input.value) + Number(b.dataset.d)).toFixed(2);
+    }
+    const s = Number(form.user_start.value), e = Number(form.user_end.value);
+    if (!(e > s)) return;
+    v.dataset.start = s; v.dataset.end = e;
+    if (b.dataset.preview !== undefined) { v.currentTime = s; v.play(); }
+  });
+
+  // --- tuning form: preset fills sliders; sliders mark custom ---
+  const preset = document.getElementById("preset");
+  const custom = document.getElementById("custom_weights");
+  document.querySelectorAll("[data-weight]").forEach((r) => {
+    r.addEventListener("input", () => { document.getElementById("o_" + r.dataset.weight).value = r.value; custom.checked = true; });
+  });
+  if (preset) preset.addEventListener("change", () => {
+    const w = PRESETS[preset.value] || {};
+    document.querySelectorAll("[data-weight]").forEach((r) => {
+      r.value = w[r.dataset.weight]; document.getElementById("o_" + r.dataset.weight).value = r.value;
+    });
+    custom.checked = false;
+  });
+
+  // --- timeline ---
+  const el = document.getElementById("timeline");
+  if (!el || !CURRENT_RUN) return;
+  function hms(t) { t = Math.max(0, Math.floor(t)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60;
+    return [h, m, s].map((x) => String(x).padStart(2, "0")).join(":"); }
+  function select(id) {
+    document.querySelectorAll(".cand.selected,.marker.selected").forEach((n) => n.classList.remove("selected"));
+    const card = document.getElementById("cand-" + id);
+    if (card) { card.classList.add("selected"); card.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    const m = document.querySelector('.marker[data-id="' + id + '"]'); if (m) m.classList.add("selected");
+  }
+  fetch("/fontes/{{ source.id }}/timeline.json?run=" + CURRENT_RUN).then((r) => r.json()).then((d) => {
+    if (!d.t || !d.t.length) { el.textContent = "Sem dados da linha do tempo."; return; }
+    const css = getComputedStyle(document.documentElement);
+    const series = [{ value: (u, v) => hms(v) },
+      { label: "interesse", stroke: css.getPropertyValue("--accent").trim(), width: 2, fill: "rgba(124,92,255,0.12)" },
+      { label: "áudio", stroke: "#4fb6ff", width: 1 }];
+    const data = [d.t, d.interest, d.audio];
+    if (d.chat) { series.push({ label: "chat", stroke: "#53fc18", width: 1 }); data.push(d.chat); }
+    const opts = {
+      width: el.clientWidth || 800, height: 180, series, legend: { show: false },
+      scales: { x: { time: false }, y: { range: [0, 1] } },
+      axes: [{ stroke: "#8b93a3", grid: { stroke: "#2a2f3a" }, values: (u, vals) => vals.map(hms) },
+             { stroke: "#8b93a3", grid: { stroke: "#2a2f3a" }, size: 40 }],
+      cursor: { drag: { x: true, y: false } },
+    };
+    const plot = new uPlot(opts, data, el);
+    new ResizeObserver(() => plot.setSize({ width: el.clientWidth, height: 180 })).observe(el);
+    const t0 = d.t[0], t1 = d.t[d.t.length - 1] || t0 + 1;
+    const strip = document.getElementById("markers");
+    d.candidates.forEach((c) => {
+      const m = document.createElement("button");
+      m.className = "marker status-" + c.status; m.dataset.id = c.id; m.type = "button";
+      m.style.left = (100 * (c.peak - t0) / (t1 - t0)) + "%";
+      m.title = "#" + c.rank + " · " + hms(c.start) + " · nota " + Math.round(c.score);
+      m.textContent = c.rank;
+      m.addEventListener("click", () => select(c.id));
+      strip.appendChild(m);
+    });
+    plot.over.addEventListener("click", () => {
+      const idx = plot.cursor.idx; if (idx == null) return;
+      const t = d.t[idx];
+      let best = null;
+      d.candidates.forEach((c) => { const dist = Math.abs(c.peak - t); if (!best || dist < best.dist) best = { id: c.id, dist }; });
+      if (best && best.dist < (t1 - t0) * 0.02 + 30) select(best.id);
+    });
+  });
+})();
+</script>
+{% endblock %}

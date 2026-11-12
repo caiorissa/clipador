@@ -13,7 +13,7 @@
       <div class="source-title">
         <span class="badge platform-{{ s.platform }}">{{ s.platform|platform_label }}</span>
         <span class="badge">{{ KIND_LABELS.get(s.kind, s.kind) }}</span>
-        <strong>{{ s.title or s.url }}</strong>
+        <a href="/fontes/{{ s.id }}"><strong>{{ s.title or s.url }}</strong></a>
       </div>
       <div class="small muted">
         #{{ s.id }} · {{ s.streamer.display_name if s.streamer }} · {{ s.duration_seconds|duration }}
@@ -28,6 +28,7 @@
     </div>
     <div class="source-status">
       <span class="status status-{{ s.status }}">{{ SOURCE_STATUS_LABELS.get(s.status, s.status) }}</span>
+      {% if s.status == 'ready' %}<a class="btn small" href="/fontes/{{ s.id }}">Analisar / candidatos</a>{% endif %}
       {% if s.status == 'failed' %}
       <form method="post" action="/fontes/{{ s.id }}/baixar" class="inline"><button class="btn small">Baixar de novo</button></form>
       {% endif %}
