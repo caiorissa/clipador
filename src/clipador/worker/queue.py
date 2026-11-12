@@ -68,6 +68,20 @@ def enqueue(
     return job
 
 
+def enqueue_next_in_chain(engine: Engine, job_id: int) -> Job | None:
+    """Jobs may carry payload["chain"] = [next stages...]. When one finishes, queue the next
+    with the rest of the chain (and the same extra payload, e.g. detection params)."""
+    with Session(engine, expire_on_commit=False) as s:
+        job = s.get(Job, job_id)
+        chain = list((job.payload or {}).get("chain") or []) if job else []
+        if not chain:
+            return None
+        payload = {**job.payload, "chain": chain[1:]}
+        nxt = enqueue(s, chain[0], job.source_id, payload)
+        s.commit()
+        return nxt
+
+
 def cancel(session: Session, job_id: int) -> Job:
     job = session.get(Job, job_id)
     if job is None:

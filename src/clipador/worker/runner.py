@@ -269,6 +269,9 @@ class Worker:
             return
         if queue.complete(self.engine, job_id, self.worker_id):
             log.info("job %s concluído", job_id)
+            nxt = queue.enqueue_next_in_chain(self.engine, job_id)
+            if nxt is not None:
+                ctx.log(f"Próximo estágio na fila: '{nxt.type}' (job #{nxt.id}).")
 
     def _fail(
         self,

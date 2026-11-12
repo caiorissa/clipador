@@ -13,6 +13,7 @@ from clipador.platforms.base import (
     path_segments,
     split_url,
 )
+from clipador.platforms.chat import YouTubeChatProvider
 
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _CLIP_ID = re.compile(r"^[A-Za-z0-9_-]{20,}$")
@@ -30,6 +31,7 @@ def _video(video_id: str) -> ParsedUrl:
 class YouTubeAdapter(PlatformAdapter):
     platform = Platform.YOUTUBE
     hosts = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+    chat_provider_cls = YouTubeChatProvider
 
     @classmethod
     def parse(cls, url: str) -> ParsedUrl:

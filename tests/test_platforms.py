@@ -126,9 +126,12 @@ def test_metadata_from_info_and_channel_match():
     assert not PlatformAdapter.channel_matches(meta.channel_candidates, ["outro"])
 
 
-def test_chat_provider_is_stub_today():
-    for p in Platform:
-        assert get_adapter(p).chat_provider() is None
+def test_every_platform_has_a_chat_provider():
+    from clipador.platforms.chat import KickChatProvider, TwitchChatProvider, YouTubeChatProvider
+
+    expected = {T: TwitchChatProvider, Y: YouTubeChatProvider, K: KickChatProvider}
+    for p, cls in expected.items():
+        assert isinstance(get_adapter(p).chat_provider(), cls)
 
 
 def test_fetch_metadata_rejects_live(monkeypatch):

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
@@ -47,16 +49,37 @@ class VideoMetadata:
 
 @dataclass(frozen=True)
 class ChatMessage:
-    t_seconds: float  # offset from the start of the VOD
+    t: float  # seconds from the start of the original video
     author: str
     text: str
+    emotes: tuple[str, ...] = ()
+
+
+@dataclass
+class ChatLog:
+    messages: list[ChatMessage]
+    provider: str
+
+
+class ChatUnavailable(Exception):
+    """Chat can't be fetched for this source; `reason` (PT-BR) is shown to the user."""
+
+    def __init__(self, reason: str, detail: str | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
 
 
 class ChatProvider(ABC):
-    """Fetches chat replay for a source. Implementations arrive on day 2."""
+    """Fetches the chat replay of a source. Returns None or raises ChatUnavailable when there is
+    no chat (not an error: detection runs without the chat signal)."""
+
+    version: str = "1"
 
     @abstractmethod
-    def fetch(self, source: Source) -> list[ChatMessage]: ...
+    def fetch(
+        self, source: Source, work_dir: Path, progress_cb: Callable[[float], None]
+    ) -> ChatLog | None: ...
 
 
 # --- URL helpers ------------------------------------------------------------------------------
@@ -189,8 +212,12 @@ class PlatformAdapter(ABC):
     ) -> DownloadResult:
         return self.ytdlp.download(url, dest, progress_cb, log_cb)
 
+    chat_provider_cls: type[ChatProvider] | None = None  # set by each platform
+
     def chat_provider(self) -> ChatProvider | None:
-        return None  # day 2
+        if self.chat_provider_cls is None:
+            return None
+        return self.chat_provider_cls(self.ytdlp.settings)
 
     @staticmethod
     def channel_matches(candidates: list[str], registered_handles: list[str]) -> bool:

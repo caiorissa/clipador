@@ -18,6 +18,7 @@ from clipador.platforms.base import (
     path_segments,
     split_url,
 )
+from clipador.platforms.chat import KickChatProvider
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _CLIP_ID = re.compile(r"^clip_[A-Za-z0-9_-]+$")
@@ -27,6 +28,7 @@ _CHANNEL = re.compile(r"^[A-Za-z0-9_-]{2,}$")
 class KickAdapter(PlatformAdapter):
     platform = Platform.KICK
     hosts = ("kick.com",)
+    chat_provider_cls = KickChatProvider
 
     @classmethod
     def parse(cls, url: str) -> ParsedUrl:

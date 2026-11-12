@@ -13,6 +13,7 @@ from clipador.platforms.base import (
     path_segments,
     split_url,
 )
+from clipador.platforms.chat import TwitchChatProvider
 
 _VOD_ID = re.compile(r"^v?(\d{5,})$")
 _CLIP_SLUG = re.compile(r"^[A-Za-z0-9_-]{4,}$")
@@ -42,6 +43,7 @@ def _clip(slug: str, channel: str | None = None) -> ParsedUrl:
 class TwitchAdapter(PlatformAdapter):
     platform = Platform.TWITCH
     hosts = ("twitch.tv", "clips.twitch.tv", "player.twitch.tv")
+    chat_provider_cls = TwitchChatProvider
 
     @classmethod
     def parse(cls, url: str) -> ParsedUrl:

@@ -1,0 +1,148 @@
+# Palavras e expressões de empolgação usadas pelo Clipador para pontuar momentos.
+#
+# Este arquivo é copiado para data/hype_words.toml na primeira análise; edite a cópia em data/.
+# Formato:  "palavra ou expressão" = peso   (peso 1.0 = normal; 0.3 = fraco; 2.0 = forte)
+# O casamento ignora acentos e maiúsculas e é por palavra inteira ("tiro" não casa "retirou").
+#
+# Evite palavras genéricas que aparecem em toda frase ("cara", "gente", "mano", "velho",
+# "tipo", "né", "aí"): elas não indicam um momento bom e só geram ruído. Elas estão na seção
+# [ignorar] só como lembrete; não são usadas.
+
+[pt]
+"caralho" = 1.5
+"porra" = 1.2
+"puta merda" = 1.6
+"puta que pariu" = 1.8
+"meu deus" = 1.4
+"meu deus do ceu" = 1.6
+"nossa senhora" = 1.2
+"jesus" = 0.8
+"que isso" = 1.0
+"o que" = 0.3
+"nao acredito" = 1.5
+"nao creio" = 1.3
+"olha isso" = 1.0
+"olha so" = 0.6
+"socorro" = 1.4
+"corre" = 0.8
+"corre corre" = 1.4
+"para para" = 1.0
+"morri" = 1.2
+"morreu" = 0.9
+"mataram" = 1.0
+"matei" = 1.0
+"acabou" = 0.6
+"ganhamos" = 1.3
+"ganhei" = 1.1
+"perdemos" = 0.9
+"eita" = 1.0
+"vish" = 0.9
+"nossa" = 0.6
+"uau" = 1.0
+"absurdo" = 1.1
+"insano" = 1.2
+"surreal" = 1.1
+"inacreditavel" = 1.3
+"que loucura" = 1.3
+"que mancada" = 1.0
+"clipa" = 2.0
+"clipa isso" = 2.2
+"clipa ai" = 2.0
+"manda o clip" = 2.0
+"vai vai vai" = 1.3
+"vamo vamo" = 1.0
+"nao nao nao" = 1.3
+"sai daqui" = 0.9
+"fudeu" = 1.4
+"se fudeu" = 1.4
+"deu ruim" = 1.3
+"deu bom" = 1.0
+
+[en]
+"oh my god" = 1.4
+"oh my gosh" = 1.2
+"what the fuck" = 1.6
+"what the hell" = 1.3
+"holy shit" = 1.6
+"no way" = 1.3
+"lets go" = 1.2
+"let's go" = 1.2
+"insane" = 1.2
+"clip it" = 2.0
+"clip that" = 2.0
+"wtf" = 1.4
+"run run" = 1.2
+"help" = 0.6
+"oh no" = 1.2
+
+[gta]
+"policia" = 0.7
+"perseguicao" = 1.3
+"viatura" = 0.6
+"estrelas" = 0.9
+"cinco estrelas" = 1.6
+"5 estrelas" = 1.6
+"helicoptero" = 1.0
+"explodiu" = 1.4
+"explosao" = 1.3
+"explode" = 1.1
+"tiro" = 0.5
+"tiroteio" = 1.1
+"atirou" = 0.8
+"capotou" = 1.4
+"capotei" = 1.4
+"bateu" = 0.6
+"bati" = 0.6
+"wasted" = 1.5
+"busted" = 1.5
+"preso" = 0.9
+"prenderam" = 1.1
+"fuga" = 0.9
+"fugir" = 0.8
+"foge" = 0.9
+"procurado" = 0.8
+"assalto" = 1.0
+"roubo" = 0.7
+"swat" = 1.2
+"tanque" = 1.0
+"aviao" = 0.6
+"caiu" = 0.6
+"atropelou" = 1.2
+"atropelei" = 1.2
+
+[chat]
+# Emotes e mensagens do chat (comparação exata da mensagem/emote, sem acento e caixa).
+"kekw" = 1.0
+"lul" = 1.0
+"lulw" = 1.0
+"omegalul" = 1.2
+"icant" = 1.0
+"pog" = 1.0
+"pogchamp" = 1.0
+"poggers" = 1.0
+"pogu" = 1.0
+"monkas" = 0.8
+"monkaw" = 0.9
+"f" = 0.8
+"clipa" = 1.5
+"clip" = 1.2
+"clip it" = 1.5
+"lmao" = 1.0
+"lol" = 0.8
+"omg" = 1.0
+"wtf" = 1.0
+"😂" = 1.0
+"🤣" = 1.0
+"😱" = 1.0
+"🔥" = 0.6
+":face-with-tears-of-joy:" = 1.0
+":rolling-on-the-floor-laughing:" = 1.0
+":face_with_tears_of_joy:" = 1.0
+":rolling_on_the_floor_laughing:" = 1.0
+
+[risada]
+# Peso para risadas transcritas ou digitadas (kkkk, hahaha, rsrs, jajaja).
+peso = 1.0
+
+[ignorar]
+lista = ["cara", "gente", "mano", "velho", "tipo", "ne", "ai", "entao", "beleza", "bora"]

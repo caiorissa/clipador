@@ -45,6 +45,28 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://localhost:11434"
 
+    # --- transcription (faster-whisper) ---
+    whisper_model: str = "medium"  # also: large-v3-turbo, small, large-v3 (may not fit 8 GB)
+    # float16 on GPU; use int8_float16 if VRAM is tight. CPU fallback always uses int8.
+    whisper_compute_type: str = "float16"
+    whisper_device: str = "auto"  # auto | cuda | cpu
+    language: str = "pt"  # "auto" = detect
+    whisper_beam_size: int = 1
+    whisper_vad_filter: bool = True
+    transcribe_chunk_seconds: int = 600
+    transcribe_chunk_overlap_seconds: int = 4
+    # Folder for downloaded Whisper models (default: <data_dir>/models).
+    whisper_model_dir: Path | None = None
+
+    # --- chat ---
+    # TwitchDownloaderCLI executable (https://github.com/lay295/TwitchDownloader/releases).
+    twitch_downloader_path: str = "TwitchDownloaderCLI"
+
+    # --- detection ---
+    detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
+    # Tolerance (s) when checking if a golden moment falls inside a candidate (clipador eval).
+    eval_tolerance_seconds: float = 2.0
+
     @model_validator(mode="after")
     def _normalize(self) -> Settings:
         if not self.data_dir.is_absolute():
@@ -98,8 +120,26 @@ class Settings(BaseSettings):
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
 
+    @property
+    def work_dir(self) -> Path:
+        return self.data_dir / "work"
+
+    @property
+    def models_dir(self) -> Path:
+        return self.whisper_model_dir or (self.data_dir / "models")
+
+    @property
+    def hype_words_path(self) -> Path:
+        return self.data_dir / "hype_words.toml"
+
+    def source_work_dir(self, source_id: int) -> Path:
+        return self.work_dir / str(source_id)
+
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.vods_dir, self.clips_dir, self.tmp_dir, self.logs_dir):
+        for d in (
+            self.data_dir, self.vods_dir, self.clips_dir, self.tmp_dir, self.logs_dir,
+            self.work_dir,
+        ):  # fmt: skip
             d.mkdir(parents=True, exist_ok=True)
 
     def abs_path(self, relative: str | Path) -> Path:

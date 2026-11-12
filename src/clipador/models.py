@@ -149,3 +149,95 @@ class Job(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
     source: Source | None = Relationship()
+
+
+# --- Analysis (step 2) -----------------------------------------------------------------------
+
+
+class ArtifactStatus(StrEnum):
+    OK = "ok"
+    SKIPPED = "skipped"  # e.g. no chat available: not an error, later stages run without it
+
+
+class StageArtifact(SQLModel, table=True):
+    """Cache record of a stage's output for a source: valid while `params_hash` matches."""
+
+    __tablename__ = "stage_artifact"
+    __table_args__ = (UniqueConstraint("source_id", "stage", name="uq_artifact_source_stage"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    stage: str
+    params_hash: str
+    status: str = Field(default=ArtifactStatus.OK)
+    message: str | None = None  # e.g. reason for skipped
+    files: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    elapsed_seconds: float | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AnalysisRun(SQLModel, table=True):
+    __tablename__ = "analysis_run"
+
+    id: int | None = Field(default=None, primary_key=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    params_hash: str = Field(index=True)
+    params: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    candidate_count: int = 0
+    elapsed_seconds: float | None = None
+    has_chat: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class CandidateStatus(StrEnum):
+    SUGGESTED = "suggested"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class Candidate(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    analysis_run_id: int = Field(foreign_key="analysis_run.id", index=True)
+    rank: int = 0
+    start: float  # seconds, relative to the original video
+    end: float
+    peak_t: float
+    score: float  # 0-100
+    breakdown: dict[str, float] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    transcript_snippet: str = Field(
+        default="", sa_column=Column(Text, nullable=False, server_default="")
+    )
+    status: str = Field(default=CandidateStatus.SUGGESTED)
+    user_start: float | None = None
+    user_end: float | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def eff_start(self) -> float:
+        return self.user_start if self.user_start is not None else self.start
+
+    @property
+    def eff_end(self) -> float:
+        return self.user_end if self.user_end is not None else self.end
+
+
+class Verdict(StrEnum):
+    GOOD = "bom"
+    BAD = "ruim"
+
+
+class CandidateFeedback(SQLModel, table=True):
+    __tablename__ = "candidate_feedback"
+
+    id: int | None = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="candidate.id", unique=True)
+    verdict: str
+    note: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
