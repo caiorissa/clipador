@@ -32,6 +32,21 @@ _DEST_RE = re.compile(r"^\[download\] Destination: (.+)$")
 _ALREADY_RE = re.compile(r"^\[download\] (.+) has already been downloaded")
 
 
+_NOISE = (
+    "Downloading video thumbnail",
+    "Video Thumbnail",
+    "Deleting original file",
+    "Writing video thumbnail",
+    "[ThumbnailsConvertor]",
+    "[MoveFiles]",
+)
+
+
+def is_noise(line: str) -> bool:
+    """Lines not worth keeping in the short job log (full output still goes to the app log)."""
+    return any(n in line for n in _NOISE)
+
+
 def parse_progress_line(line: str) -> float | None:
     """Return the percentage from a yt-dlp '[download]  42.0% of ...' line, else None."""
     m = _PCT_RE.match(line.strip())
@@ -339,7 +354,9 @@ class YtDlp:
                 update = tracker.feed(line)
                 if update is not None:
                     progress_cb(*update)
-                elif log_cb and not line.startswith("[download]"):
+                elif line.startswith("[download]") or is_noise(line):
+                    log.debug("yt-dlp: %s", line)
+                elif log_cb:
                     log_cb(line)
             proc.wait()
         except BaseException:

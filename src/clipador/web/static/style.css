@@ -122,6 +122,7 @@ tr.inactive td { opacity: .55; }
 .source { display: grid; grid-template-columns: 160px 1fr auto; gap: 1rem; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; }
 .thumb img, .thumb-placeholder { width: 160px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: var(--panel-2); display: block; }
 .thumb-placeholder { display: grid; place-items: center; color: var(--muted); font-size: .8rem; }
+.source-body, .flash, td { overflow-wrap: anywhere; min-width: 0; }
 .source-title { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; margin-bottom: .2rem; }
 .source-status { text-align: right; display: grid; gap: .4rem; justify-items: end; }
 

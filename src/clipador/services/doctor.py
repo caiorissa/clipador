@@ -83,6 +83,29 @@ def check_ytdlp(settings: Settings) -> CheckResult:
     )
 
 
+def check_js_runtime() -> CheckResult:
+    """yt-dlp needs a JavaScript runtime (Deno by default) to solve YouTube's challenges."""
+    name = "Runtime JS (YouTube)"
+    deno = shutil.which("deno")
+    if deno:
+        try:
+            res = subprocess.run(
+                [deno, "--version"], capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=15,
+            )  # fmt: skip
+            version = (res.stdout.splitlines() or ["deno"])[0]
+        except (OSError, subprocess.TimeoutExpired):
+            version = deno
+        return CheckResult(name, CheckStatus.OK, version)
+    return CheckResult(
+        name,
+        CheckStatus.WARN,
+        "Deno não encontrado: no YouTube o yt-dlp pode não achar todos os formatos (ex.: 1080p).",
+        "Instale o Deno no PowerShell: `irm https://deno.land/install.ps1 | iex` e reabra o "
+        "terminal. Twitch e Kick não precisam dele.",
+    )
+
+
 def check_cookies(settings: Settings) -> CheckResult:
     if settings.cookies_file:
         if settings.cookies_file.is_file():
@@ -192,6 +215,7 @@ def run_all(settings: Settings) -> list[CheckResult]:
         check_binary("ffmpeg", settings.ffmpeg_path),
         check_binary("ffprobe", settings.ffprobe_path),
         check_ytdlp(settings),
+        check_js_runtime(),
         check_cookies(settings),
         check_gpu(),
         check_nvenc(settings),

@@ -20,8 +20,10 @@ fila de jobs com worker separado, diagnóstico do ambiente (`doctor`).
 3. **ffmpeg + ffprobe**: baixe o build "essentials" em <https://www.gyan.dev/ffmpeg/builds/>,
    extraia e coloque a pasta `bin` no PATH. Confira com `ffmpeg -version`.
 4. **Driver NVIDIA** atualizado (para NVENC). Sem GPU o app usa `libx264` automaticamente.
-5. **Git** (opcional, para versionar): <https://git-scm.com/download/win>.
-6. **Ollama** (opcional por enquanto, usado a partir do dia 3): <https://ollama.com/download>.
+5. **Deno** (recomendado para o YouTube): o yt-dlp precisa de um runtime JavaScript para achar
+   todos os formatos do YouTube. PowerShell: `irm https://deno.land/install.ps1 | iex`.
+6. **Git** (opcional, para versionar): <https://git-scm.com/download/win>.
+7. **Ollama** (opcional por enquanto, usado a partir do dia 3): <https://ollama.com/download>.
 
 O `yt-dlp` é instalado pelo `uv sync` como dependência do projeto.
 
@@ -42,6 +44,9 @@ uv run clipador worker      # processa a fila de jobs
 ```
 
 O banco (SQLite) é criado e migrado automaticamente em `data/clipador.db` na primeira execução.
+Rode só um worker por pasta de dados (um segundo worker se recusa a subir). Se o worker for
+fechado no meio de um job, os processos do yt-dlp/ffmpeg morrem junto e, ao subir de novo, o job
+volta para a fila e continua o download de onde parou.
 
 ## Fluxo básico
 
