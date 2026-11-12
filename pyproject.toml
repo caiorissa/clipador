@@ -3,7 +3,7 @@ name = "clipador"
 version = "0.1.0"
 description = "Transforma VODs de streamers em clips verticais legendados (Shorts, TikTok, Reels)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11"  # pinned to 3.12 in .python-version (ctranslate2 wheels)
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",

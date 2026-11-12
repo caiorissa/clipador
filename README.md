@@ -14,7 +14,8 @@ fila de jobs com worker separado, diagnóstico do ambiente (`doctor`).
 
 ## Requisitos (Windows 11)
 
-1. **Python 3.11+**: <https://www.python.org/downloads/> (marque "Add python.exe to PATH").
+1. **Python**: o projeto está fixado em **3.12** (`.python-version`), por compatibilidade com
+   faster-whisper/ctranslate2. Não precisa instalar à mão: o `uv sync` baixa o 3.12 sozinho.
 2. **uv**: no PowerShell, `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
    (ou `python -m pip install --user uv`).
 3. **ffmpeg + ffprobe**: baixe o build "essentials" em <https://www.gyan.dev/ffmpeg/builds/>,
