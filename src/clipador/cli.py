@@ -78,6 +78,46 @@ def cmd_migrate(settings: Settings) -> int:
     return 0
 
 
+def _engine(settings: Settings):
+    from clipador.db import make_engine, run_migrations
+
+    run_migrations(settings)
+    return make_engine(settings)
+
+
+def cmd_dump(settings: Settings, args) -> int:
+    from pathlib import Path
+
+    from clipador.errors import ClipadorError
+    from clipador.services.calibration import dump
+
+    try:
+        print(dump(_engine(settings), args.source_id, args.top, Path(args.out), args.run))
+    except ClipadorError as e:
+        print(e.message, file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_eval(settings: Settings, args) -> int:
+    from pathlib import Path
+
+    from clipador.errors import ClipadorError
+    from clipador.services.calibration import run_eval
+
+    if args.tolerance is not None:
+        settings = settings.model_copy(update={"eval_tolerance_seconds": args.tolerance})
+    try:
+        _res, text = run_eval(
+            _engine(settings), settings, args.source_id, Path(args.golden), args.run
+        )
+    except ClipadorError as e:
+        print(e.message, file=sys.stderr)
+        return 1
+    print(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_stdout()
     parser = argparse.ArgumentParser(prog="clipador", description="Clipador: VODs -> clips 9:16")
@@ -88,9 +128,23 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("worker", help="processa a fila de jobs")
     sub.add_parser("doctor", help="verifica o ambiente")
     sub.add_parser("migrate", help="aplica as migrações do banco")
+    d = sub.add_parser("dump", help="mostra os melhores candidatos e salva candidates.csv")
+    d.add_argument("source_id", type=int)
+    d.add_argument("--top", type=int, default=20)
+    d.add_argument("--run", type=int, help="id da análise (padrão: a mais recente)")
+    d.add_argument("--out", default="candidates.csv")
+    ev = sub.add_parser("eval", help="mede recall@N contra momentos marcados à mão")
+    ev.add_argument("source_id", type=int)
+    ev.add_argument("--golden", required=True, help="arquivo com um HH:MM:SS por linha")
+    ev.add_argument("--run", type=int, help="id da análise (padrão: a mais recente)")
+    ev.add_argument("--tolerance", type=float, help="folga em segundos (padrão 2)")
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.command == "dump":
+        return cmd_dump(settings, args)
+    if args.command == "eval":
+        return cmd_eval(settings, args)
     if args.command == "doctor":
         return cmd_doctor(settings)
     if args.command == "web":

@@ -8,6 +8,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 import httpx
 
@@ -208,6 +209,111 @@ def check_ollama(settings: Settings) -> CheckResult:
     return CheckResult("Ollama", CheckStatus.OK, detail)
 
 
+def check_faster_whisper() -> CheckResult:
+    try:
+        from importlib.metadata import version
+
+        fw, ct2 = version("faster-whisper"), version("ctranslate2")
+    except Exception as e:
+        return CheckResult(
+            "faster-whisper", CheckStatus.FAIL, f"não instalado ({e})", "Rode `uv sync`."
+        )
+    return CheckResult("faster-whisper", CheckStatus.OK, f"faster-whisper {fw} · ctranslate2 {ct2}")
+
+
+def check_cuda_whisper(settings: Settings) -> CheckResult:
+    from clipador.services.cuda import CUDA_LIBS_HINT, cuda_status
+
+    name = "CUDA para Whisper"
+    st = cuda_status()
+    if st.error:
+        return CheckResult(name, CheckStatus.FAIL, st.error, CUDA_LIBS_HINT)
+    if st.missing_dlls:
+        return CheckResult(
+            name,
+            CheckStatus.FAIL,
+            "cuBLAS/cuDNN não encontrados: " + ", ".join(st.missing_dlls),
+            CUDA_LIBS_HINT,
+        )
+    if st.device_count == 0:
+        return CheckResult(
+            name,
+            CheckStatus.WARN,
+            "o ctranslate2 não enxerga nenhuma GPU CUDA: a transcrição vai rodar na CPU (int8), "
+            "muito mais lenta.",
+            "Atualize o driver NVIDIA (rode nvidia-smi para conferir).",
+        )
+    return CheckResult(
+        name,
+        CheckStatus.OK,
+        f"{st.device_count} GPU(s) visível(is) · cuBLAS/cuDNN ok · modelo "
+        f"'{settings.whisper_model}' ({settings.whisper_compute_type})",
+    )
+
+
+def check_vram_free() -> CheckResult:
+    name = "VRAM livre"
+    if not shutil.which("nvidia-smi"):
+        return CheckResult(name, CheckStatus.WARN, "nvidia-smi não encontrado.")
+    try:
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+        )  # fmt: skip
+        free, total = (int(v.strip()) for v in res.stdout.strip().splitlines()[0].split(","))
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as e:
+        return CheckResult(name, CheckStatus.WARN, f"não foi possível ler: {e}")
+    detail = f"{free / 1024:.1f} GB livres de {total / 1024:.1f} GB"
+    if free < 3000:
+        return CheckResult(
+            name,
+            CheckStatus.WARN,
+            detail,
+            "O Whisper 'medium' em float16 usa ~2–3 GB. Feche jogos/OBS durante a análise ou use "
+            "CLIPADOR_WHISPER_COMPUTE_TYPE=int8_float16.",
+        )
+    return CheckResult(name, CheckStatus.OK, detail)
+
+
+def check_twitch_downloader(settings: Settings) -> CheckResult:
+    name = "TwitchDownloaderCLI"
+    configured = settings.twitch_downloader_path
+    exe = shutil.which(configured) or (configured if Path(configured).is_file() else None)
+    hint = (
+        "Baixe em https://github.com/lay295/TwitchDownloader/releases (TwitchDownloaderCLI-…-"
+        "Windows-x64.zip), extraia e defina CLIPADOR_TWITCH_DOWNLOADER_PATH no .env com o caminho "
+        "do .exe. Sem ele, VODs da Twitch são analisados sem o sinal de chat."
+    )
+    if not exe:
+        return CheckResult(name, CheckStatus.WARN, f"não encontrado ('{configured}').", hint)
+    try:
+        res = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=20,
+        )  # fmt: skip
+        version = (res.stdout.strip() or res.stderr.strip()).splitlines()[:1]
+    except (OSError, subprocess.TimeoutExpired):
+        version = []
+    return CheckResult(name, CheckStatus.OK, f"{exe} {version[0] if version else ''}".strip())
+
+
+def check_models_dir(settings: Settings) -> CheckResult:
+    d = settings.models_dir
+    d.mkdir(parents=True, exist_ok=True)
+    free_gb = shutil.disk_usage(d).free / 1024**3
+    size_gb = sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) / 1024**3
+    detail = f"{d} · {size_gb:.1f} GB em modelos · {free_gb:.1f} GB livres"
+    if free_gb < 5:
+        return CheckResult(
+            "Modelos Whisper",
+            CheckStatus.WARN,
+            detail,
+            "O modelo 'medium' ocupa ~1,5 GB e o 'large-v3' ~3 GB. Libere espaço ou defina "
+            "CLIPADOR_WHISPER_MODEL_DIR em outro disco.",
+        )
+    return CheckResult("Modelos Whisper", CheckStatus.OK, detail)
+
+
 def run_all(settings: Settings) -> list[CheckResult]:
     return [
         check_system(),
@@ -219,6 +325,11 @@ def run_all(settings: Settings) -> list[CheckResult]:
         check_cookies(settings),
         check_gpu(),
         check_nvenc(settings),
+        check_faster_whisper(),
+        check_cuda_whisper(settings),
+        check_vram_free(),
+        check_models_dir(settings),
+        check_twitch_downloader(settings),
         check_disk(settings),
         check_ollama(settings),
     ]
