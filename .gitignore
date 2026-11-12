@@ -1,0 +1,23 @@
+# runtime data (db, vods, clips, tmp)
+data/
+
+# secrets / local config
+.env
+config.toml
+cookies*.txt
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
