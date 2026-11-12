@@ -48,3 +48,4 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # PT-BR text has accented chars and typ
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Fontes{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Fontes</h1></div>
+
+<form method="post" action="/fontes" class="card form">
+  <label>URL do VOD ou clip (Twitch, YouTube ou Kick)
+    <input name="url" required autocomplete="off" value="{{ form.get('url', '') }}"
+           placeholder="https://www.twitch.tv/videos/… · https://youtu.be/… · https://kick.com/canal/videos/…"
+           hx-post="/fontes/detectar" hx-trigger="input changed delay:300ms, load" hx-target="#detect">
+  </label>
+  <div id="detect" class="detect" aria-live="polite"></div>
+
+  <div class="grid3">
+    <label>Streamer
+      <select name="streamer_id" required>
+        <option value="">— escolha —</option>
+        {% for s in streamers %}
+          <option value="{{ s.id }}" {{ 'selected' if form.get('streamer_id') == s.id|string }}>
+            {{ s.display_name }}{{ '' if s.permission_confirmed else ' (sem autorização)' }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Início do trecho (opcional)
+      <input name="start_offset" value="{{ form.get('start_offset', '') }}" placeholder="ex.: 1:05:00">
+    </label>
+    <label>Fim do trecho (opcional)
+      <input name="end_offset" value="{{ form.get('end_offset', '') }}" placeholder="ex.: 2:30:00">
+    </label>
+  </div>
+  {% if not streamers %}<p class="small muted">Cadastre um streamer antes em <a href="/streamers/novo">Streamers</a>.</p>{% endif %}
+  <div class="form-actions"><button class="btn primary">Adicionar e baixar</button></div>
+</form>
+
+<div hx-get="/fontes/tabela" hx-trigger="every 4s" hx-swap="innerHTML">
+  {% include "sources/_table.html" %}
+</div>
+{% endblock %}

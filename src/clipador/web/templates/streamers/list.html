@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Streamers{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Streamers</h1>
+  <a class="btn primary" href="/streamers/novo">+ Novo streamer</a>
+</div>
+<p class="muted">Só clipe quem autorizou. Fontes de streamers sem autorização confirmada são bloqueadas.</p>
+
+{% if not streamers %}
+  <div class="empty">Nenhum streamer cadastrado ainda. <a href="/streamers/novo">Cadastre o primeiro</a>.</div>
+{% else %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Nome</th><th>Autorização</th><th>Canais</th><th>Crédito</th><th></th></tr></thead>
+  <tbody>
+  {% for s in streamers %}
+    <tr class="{{ 'inactive' if not s.active }}">
+      <td><a href="/streamers/{{ s.id }}/editar"><strong>{{ s.display_name }}</strong></a>
+        {% if not s.active %}<span class="badge muted">desativado</span>{% endif %}</td>
+      <td>
+        {% if s.permission_confirmed %}
+          <span class="badge ok">✔ autorizado</span>
+          <div class="small muted">{{ s.permission_date.strftime('%d/%m/%Y') if s.permission_date }}{% if s.permission_note %} · {{ s.permission_note }}{% endif %}</div>
+        {% else %}
+          <span class="badge fail">sem autorização</span>
+        {% endif %}
+      </td>
+      <td>
+        {% for c in s.channels %}<span class="badge platform-{{ c.platform }}">{{ c.platform|platform_label }}: {{ c.channel_handle }}</span> {% else %}<span class="muted">—</span>{% endfor %}
+      </td>
+      <td class="small">{{ s.credit_text or '—' }}</td>
+      <td class="actions">
+        <a class="btn small" href="/streamers/{{ s.id }}/editar">Editar</a>
+        <form method="post" action="/streamers/{{ s.id }}/ativo" class="inline">
+          <button class="btn small {{ 'danger' if s.active }}">{{ 'Desativar' if s.active else 'Reativar' }}</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Job #{{ job.id }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Job #{{ job.id }} · {{ JOB_TYPE_LABELS.get(job.type, job.type) }}</h1>
+  <a class="btn" href="/jobs">← Jobs</a>
+</div>
+<div hx-get="/jobs/{{ job.id }}/log" hx-trigger="every 2s" hx-swap="innerHTML">
+  {% include "jobs/_log.html" %}
+</div>
+{% endblock %}

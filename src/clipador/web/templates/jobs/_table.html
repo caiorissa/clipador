@@ -1,0 +1,39 @@
+{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+{% if not jobs %}
+  <div class="empty">Nenhum job ainda.</div>
+{% else %}
+<div class="table-wrap">
+<table class="jobs">
+  <thead><tr><th>#</th><th>Tipo</th><th>Fonte</th><th>Status</th><th class="w-progress">Progresso</th><th>Tentativas</th><th></th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td>
+      <td>{{ JOB_TYPE_LABELS.get(j.type, j.type) }}{% if j.needs_gpu %} <span class="badge small">GPU</span>{% endif %}</td>
+      <td class="small">{% if j.source %}<span class="badge platform-{{ j.source.platform }}">{{ j.source.platform|platform_label }}</span> {{ (j.source.title or j.source.url)[:60] }}{% else %}—{% endif %}</td>
+      <td>
+        <span class="status status-{{ j.status }}">{{ JOB_STATUS_LABELS.get(j.status, j.status) }}</span>
+        {% if j.status == 'queued' and j.attempts > 0 %}<div class="small muted">nova tentativa às {{ j.run_after|dt }}</div>{% endif %}
+        {% if j.error and j.status in ('failed', 'queued') %}<div class="small error-text">{{ j.error }}</div>{% endif %}
+      </td>
+      <td>
+        <div class="progress" role="progressbar" aria-valuenow="{{ j.progress|round|int }}" aria-valuemin="0" aria-valuemax="100">
+          <div class="bar status-{{ j.status }}" style="width: {{ j.progress }}%"></div>
+        </div>
+        <span class="small muted">{{ j.progress|round(1) }}%</span>
+      </td>
+      <td class="small">{{ j.attempts }}/{{ j.max_attempts }}</td>
+      <td class="actions">
+        <a class="btn small" href="/jobs/{{ j.id }}">Log</a>
+        {% if j.status in ('queued', 'running') %}
+          <button class="btn small danger" hx-post="/jobs/{{ j.id }}/cancelar" hx-target="#jobs-table" hx-confirm="Cancelar o job #{{ j.id }}?">Cancelar</button>
+        {% elif j.status in ('failed', 'canceled') %}
+          <button class="btn small" hx-post="/jobs/{{ j.id }}/tentar-de-novo" hx-target="#jobs-table">Tentar de novo</button>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}

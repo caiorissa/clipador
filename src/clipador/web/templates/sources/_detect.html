@@ -1,0 +1,7 @@
+{% if parsed %}
+  <span class="badge platform-{{ parsed.platform }}">{{ parsed.platform|platform_label }}</span>
+  <span class="badge">{{ KIND_LABELS.get(parsed.kind, parsed.kind) }}</span>
+  <span class="small muted">id {{ parsed.external_id }}{% if parsed.channel_handle %} · canal {{ parsed.channel_handle }}{% endif %}</span>
+{% elif error %}
+  <span class="small error-text">{{ error }}</span>
+{% endif %}

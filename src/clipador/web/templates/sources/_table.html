@@ -1,0 +1,38 @@
+{% if not sources %}
+  <div class="empty">Nenhuma fonte ainda. Cole a URL de um VOD ou clip acima.</div>
+{% else %}
+<div class="source-list">
+  {% for s in sources %}
+  <article class="source">
+    <div class="thumb">
+      {% if s.thumbnail_path %}<img src="/arquivos/{{ s.thumbnail_path }}" alt="" loading="lazy">
+      {% elif s.thumbnail_url %}<img src="{{ s.thumbnail_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      {% else %}<div class="thumb-placeholder">sem miniatura</div>{% endif %}
+    </div>
+    <div class="source-body">
+      <div class="source-title">
+        <span class="badge platform-{{ s.platform }}">{{ s.platform|platform_label }}</span>
+        <span class="badge">{{ KIND_LABELS.get(s.kind, s.kind) }}</span>
+        <strong>{{ s.title or s.url }}</strong>
+      </div>
+      <div class="small muted">
+        #{{ s.id }} · {{ s.streamer.display_name if s.streamer }} · {{ s.duration_seconds|duration }}
+        {% if s.start_offset is not none or s.end_offset is not none %}
+          · trecho {{ s.start_offset|duration if s.start_offset is not none else 'início' }}–{{ s.end_offset|duration if s.end_offset is not none else 'fim' }}
+        {% endif %}
+        {% if s.media_info %} · {{ s.media_info.width }}x{{ s.media_info.height }}{% endif %}
+        · <a href="{{ s.url }}" target="_blank" rel="noopener">abrir original</a>
+      </div>
+      {% if s.warning %}<div class="small warn-text">⚠ {{ s.warning }}</div>{% endif %}
+      {% if s.error %}<div class="small error-text">{{ s.error }}</div>{% endif %}
+    </div>
+    <div class="source-status">
+      <span class="status status-{{ s.status }}">{{ SOURCE_STATUS_LABELS.get(s.status, s.status) }}</span>
+      {% if s.status == 'failed' %}
+      <form method="post" action="/fontes/{{ s.id }}/baixar" class="inline"><button class="btn small">Baixar de novo</button></form>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% endif %}

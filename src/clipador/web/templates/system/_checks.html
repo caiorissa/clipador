@@ -1,0 +1,14 @@
+{% set icons = {'ok': '✔ OK', 'warn': '⚠ AVISO', 'fail': '✖ FALHA'} %}
+<div class="table-wrap">
+<table class="checks">
+  <tbody>
+  {% for r in results %}
+    <tr>
+      <td><span class="status check-{{ r.status }}">{{ icons[r.status] }}</span></td>
+      <td><strong>{{ r.name }}</strong></td>
+      <td>{{ r.detail }}{% if r.hint %}<div class="small muted">dica: {{ r.hint }}</div>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

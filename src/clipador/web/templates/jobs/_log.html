@@ -1,0 +1,13 @@
+<div class="card">
+  <div class="kv">
+    <div><span class="muted">Status</span> <span class="status status-{{ job.status }}">{{ JOB_STATUS_LABELS.get(job.status, job.status) }}</span></div>
+    <div><span class="muted">Progresso</span> {{ job.progress|round(1) }}%</div>
+    <div><span class="muted">Tentativas</span> {{ job.attempts }}/{{ job.max_attempts }}</div>
+    <div><span class="muted">Criado</span> {{ job.created_at|dt }}</div>
+    <div><span class="muted">Fonte</span> {% if job.source %}#{{ job.source.id }} {{ job.source.title or job.source.url }}{% else %}—{% endif %}</div>
+  </div>
+  <div class="progress"><div class="bar status-{{ job.status }}" style="width: {{ job.progress }}%"></div></div>
+  {% if job.error %}<div class="flash error">{{ job.error }}</div>{% endif %}
+</div>
+<h2>Log</h2>
+<pre class="log">{{ job.log or '(vazio)' }}</pre>

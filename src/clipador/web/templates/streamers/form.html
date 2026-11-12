@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ streamer.display_name if streamer else 'Novo streamer' }}{% endblock %}
+{% block content %}
+{# `form` holds submitted values after a validation error; otherwise values come from `streamer`. #}
+{% macro val(field, default='') -%}
+  {%- if form is not none and field in form -%}{{ form[field] }}
+  {%- elif streamer and streamer[field] is not none -%}{{ streamer[field] }}
+  {%- else -%}{{ default }}{%- endif -%}
+{%- endmacro %}
+{% set confirmed = (form.get('permission_confirmed') == 'on') if form else (streamer.permission_confirmed if streamer else False) %}
+
+<div class="page-head">
+  <h1>{{ streamer.display_name if streamer else 'Novo streamer' }}</h1>
+  <a class="btn" href="/streamers">← Voltar</a>
+</div>
+
+<form method="post" action="{{ '/streamers/%d' % streamer.id if streamer else '/streamers' }}" class="card form">
+  <label>Nome de exibição
+    <input name="display_name" required value="{{ val('display_name') }}" placeholder="Ex.: Fulano">
+  </label>
+
+  <fieldset class="permission {{ 'ok' if confirmed else 'warn' }}">
+    <legend>Autorização para clipes</legend>
+    <label class="check">
+      <input type="checkbox" name="permission_confirmed" {{ 'checked' if confirmed }}>
+      <strong>Autorização confirmada</strong> — o streamer liberou clipes do conteúdo dele
+    </label>
+    <div class="grid2">
+      <label>Data da autorização
+        <input type="date" name="permission_date" max="{{ today.isoformat() }}"
+               value="{{ val('permission_date', today.isoformat() if not streamer else '') }}">
+      </label>
+      <label>Observação (onde/como liberou)
+        <input name="permission_note" value="{{ val('permission_note') }}" placeholder="Ex.: liberou no Discord em 10/11">
+      </label>
+    </div>
+    <p class="small muted">Sem autorização confirmada, o Clipador não aceita VODs nem clips deste streamer.</p>
+  </fieldset>
+
+  <label>Crédito sugerido na descrição
+    <input name="credit_text" value="{{ val('credit_text') }}" placeholder="{{ credit_suggestion or 'Gerado a partir do primeiro canal se ficar vazio' }}">
+  </label>
+
+  {% if not streamer %}
+  <fieldset>
+    <legend>Canais</legend>
+    <p class="small muted">Nome do canal ou link (ex.: fulano, @fulano, https://kick.com/fulano). Pode adicionar mais depois.</p>
+    <div class="grid3">
+      {% for p in PLATFORMS %}
+      <label>{{ PLATFORM_LABELS[p] }}
+        <input name="channel_{{ p.value }}" value="{{ form.get('channel_' ~ p.value, '') if form else '' }}">
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  {% endif %}
+
+  <fieldset>
+    <legend>Layout padrão dos clips</legend>
+    {% set layout = val('default_layout', 'blur') %}
+    <label class="check"><input type="radio" name="default_layout" value="blur" {{ 'checked' if layout == 'blur' }}> Fundo borrado</label>
+    <label class="check"><input type="radio" name="default_layout" value="facecam" {{ 'checked' if layout == 'facecam' }}> Facecam embaixo</label>
+    <p class="small muted">Retângulo da facecam no vídeo original, em pixels (opcional; dá para ajustar no dia 4).</p>
+    <div class="grid4">
+      <label>x <input name="facecam_x" inputmode="numeric" value="{{ val('facecam_x') }}"></label>
+      <label>y <input name="facecam_y" inputmode="numeric" value="{{ val('facecam_y') }}"></label>
+      <label>largura <input name="facecam_w" inputmode="numeric" value="{{ val('facecam_w') }}"></label>
+      <label>altura <input name="facecam_h" inputmode="numeric" value="{{ val('facecam_h') }}"></label>
+    </div>
+  </fieldset>
+
+  <div class="form-actions"><button class="btn primary">{{ 'Salvar' if streamer else 'Cadastrar' }}</button></div>
+</form>
+
+{% if streamer %}
+<section class="card">
+  <h2>Canais</h2>
+  {% if streamer.channels %}
+  <ul class="channel-list">
+    {% for c in streamer.channels %}
+    <li>
+      <span class="badge platform-{{ c.platform }}">{{ c.platform|platform_label }}</span> {{ c.channel_handle }}
+      <form method="post" action="/streamers/{{ streamer.id }}/canais/{{ c.id }}/remover" class="inline">
+        <button class="btn small danger" title="Remover canal">Remover</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">Nenhum canal cadastrado.</p>{% endif %}
+  <form method="post" action="/streamers/{{ streamer.id }}/canais" class="inline-form">
+    <select name="platform" aria-label="Plataforma">
+      {% for p in PLATFORMS %}<option value="{{ p.value }}">{{ PLATFORM_LABELS[p] }}</option>{% endfor %}
+    </select>
+    <input name="channel_handle" placeholder="nome do canal ou link" required>
+    <button class="btn">+ Adicionar canal</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
