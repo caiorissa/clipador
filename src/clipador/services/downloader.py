@@ -368,7 +368,8 @@ def find_video_file(dest_dir: Path) -> Path | None:
     if mp4.is_file():
         return mp4
     for p in sorted(dest_dir.glob(f"{VIDEO_BASENAME}.*")):
-        if p.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov", ".ts", ".flv"):
+        # stem check skips per-format partials like video.f137.mp4 and video.mp4.part
+        if p.stem == VIDEO_BASENAME and p.suffix.lower() in (".mkv", ".webm", ".mov", ".ts"):
             return p
     return None
 
