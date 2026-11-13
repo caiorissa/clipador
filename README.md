@@ -59,6 +59,42 @@ uv run clipador eval 1 --golden golden.txt   # recall@5/10/20, precisão@N e mom
 
 Os botões Bom/Ruim da página entram na precisão@N.
 
+## IA local (Passo 3, opcional)
+
+Com o [Ollama](https://ollama.com/download) rodando, o estágio **IA (Ollama)** (último da cadeia
+Analisar, ou o botão **Enriquecer com IA**) avalia os melhores K candidatos (padrão 3 × 5 clips)
+e escreve o pacote de postagem:
+
+- notas da IA (humor, surpresa, habilidade, emoção, faz sentido sozinho, força do início, geral),
+  o motivo, "precisa de contexto" e **alertas** de monetização (com o trecho que disparou);
+- 3 títulos, texto de abertura, descrição e hashtags; o código monta os rascunhos de **YouTube
+  Shorts, TikTok e Instagram Reels** e sempre acrescenta o **crédito do streamer** (e o link).
+- **Nota final** = peso × detecção + peso × IA (padrão 50/50), com penalidades leves para clips
+  que precisam de contexto. Mudar os pesos reordena na hora, sem chamar a IA.
+
+Sem Ollama tudo continua funcionando: a etapa fica "pulado", vale a nota de detecção e cada
+candidato ganha um rascunho simples (primeira frase do trecho), editável.
+
+```powershell
+# 1) instale o Ollama: https://ollama.com/download  (ele fica rodando na bandeja)
+ollama pull qwen2.5:7b                 # ~4,7 GB; alternativas: llama3.1:8b, qwen3:8b
+uv run clipador doctor                 # confere Ollama, modelo e faz uma geração de teste
+uv run clipador llm-bench --n 10 --models qwen2.5:7b,llama3.1:8b   # qual modelo vale no seu PC
+uv run clipador eval 1 --golden golden.txt --with-llm              # a IA melhorou ou piorou?
+```
+
+Configuração (`.env`): `CLIPADOR_LLM_MODEL`, `CLIPADOR_TARGET_CLIPS`, `CLIPADOR_LLM_NUM_CTX`,
+`CLIPADOR_RANK_WEIGHT_DETECT` / `CLIPADOR_RANK_WEIGHT_LLM`, `CLIPADOR_DEFAULT_GAME`. O prompt fica
+em `prompts/enrich_v1.md` (veja `prompts/README.md`); mudar o prompt, o modelo ou pedir "Regerar"
+com uma instrução invalida o cache só do que mudou. Rascunhos que você editou nunca são
+sobrescritos sem você marcar "sobrescrever o que eu editei".
+
+**GPU:** a transcrição e a IA nunca rodam juntas (lock de GPU do worker). O Whisper libera a VRAM
+ao terminar (medido: ~2,1 GB → volta a ~170 MB acima do normal) e o modelo do Ollama é
+descarregado no fim do estágio (`keep_alive=0`); os dois valores aparecem no log do job.
+
+> ⚠️ A IA não detecta **música com direitos autorais** de fundo: confira antes de postar.
+
 ## Requisitos (Windows 11)
 
 1. **Python**: o projeto está fixado em **3.12** (`.python-version`), por compatibilidade com
