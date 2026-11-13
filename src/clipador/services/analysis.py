@@ -61,6 +61,14 @@ def reanalyze(session: Session, source_id: int, params: DetectParams) -> Job:
     return queue.enqueue(session, "detect", source_id, {"detect_params": params.model_dump()})
 
 
+def artifact(session: Session, source_id: int, stage: str) -> StageArtifact | None:
+    return session.exec(
+        select(StageArtifact).where(
+            StageArtifact.source_id == source_id, StageArtifact.stage == stage
+        )
+    ).first()
+
+
 def enqueue_enrich(
     session: Session,
     source_id: int,

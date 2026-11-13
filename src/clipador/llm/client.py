@@ -161,3 +161,33 @@ class OllamaClient:
 def make_llm_client(settings: Settings) -> LLMClient:
     """Factory used by the enrich stage, doctor and CLI (tests monkeypatch it)."""
     return OllamaClient(settings.llm_base_url)
+
+
+@dataclass
+class OllamaStatus:
+    ok: bool
+    models: list[str]
+    configured: str
+    configured_installed: bool
+    message: str
+    hint: str = ""
+
+
+def ollama_status(settings: Settings) -> OllamaStatus:
+    """For the UI/doctor: is Ollama up, which models, is the configured one installed."""
+    client = make_llm_client(settings)
+    try:
+        models = client.list_models()
+    except LLMUnavailable as e:
+        return OllamaStatus(False, [], settings.llm_model, False, e.message, e.hint)
+    installed = model_installed(models, settings.llm_model)
+    if installed:
+        return OllamaStatus(True, models, settings.llm_model, True, "Ollama ok.")
+    return OllamaStatus(
+        True,
+        models,
+        settings.llm_model,
+        False,
+        f"Ollama ok, mas o modelo '{settings.llm_model}' não está instalado.",
+        f"Rode `ollama pull {settings.llm_model}` (ou escolha um modelo instalado).",
+    )

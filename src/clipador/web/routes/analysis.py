@@ -5,21 +5,25 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from sqlmodel import Session, select
 
 from clipador.config import Settings
 from clipador.detection.params import PRESET_LABELS, PRESETS, SIGNALS, DetectParams
 from clipador.errors import ValidationError
+from clipador.llm.drafts import DRAFT_LABELS, DRAFT_PLATFORMS, clean_hashtags, clean_text
+from clipador.llm.scoring import RankingParams
 from clipador.models import (
     AnalysisRun,
     Candidate,
     CandidateFeedback,
     CandidateStatus,
+    PostDraft,
     Source,
     Verdict,
 )
 from clipador.services import analysis
+from clipador.services.enrichment import drafts_for, enrichments_for, score_parts, set_ranking
 from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
 
@@ -28,6 +32,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 
 SIGNAL_LABELS = {"audio": "Áudio", "chat": "Chat", "speech": "Fala", "keywords": "Palavras"}
+SORTS = {"final": "Nota final", "detect": "Detecção", "ia": "IA", "time": "Horário"}
 
 
 def _source(session: Session, source_id: int) -> Source:
@@ -58,12 +63,17 @@ def source_detail(
     session: SessionDep,
     settings: SettingsDep,
     run: int | None = None,
+    sort: str = "final",
 ):
     source = _source(session, source_id)
     runs = analysis.runs_for(session, source_id)
     selected = _selected_run(session, source_id, run)
     cands = analysis.candidates_for(session, selected.id) if selected else []
     params = _form_params(selected, settings.detect_preset)
+    ranking = RankingParams.from_run(selected.params, settings) if selected else None
+    items = _card_items(session, cands, ranking or RankingParams.from_settings(settings))
+    items = _sorted(items, sort)
+    enrich_art = analysis.artifact(session, source_id, "enrich")
     return render(
         request,
         "analysis/detail.html",
@@ -72,6 +82,17 @@ def source_detail(
         run=selected,
         pinned_run=run is not None,
         candidates=cands,
+        items=items,
+        sort=sort if sort in SORTS else "final",
+        sorts=SORTS,
+        ranking=ranking,
+        enrich_art=enrich_art,
+        llm_model=(enrich_art.summary.get("model") if enrich_art and enrich_art.summary else None)
+        or settings.llm_model,
+        enrich_k=settings.enrich_k,
+        game=source.game or settings.default_game,
+        draft_platforms=DRAFT_PLATFORMS,
+        draft_labels=DRAFT_LABELS,
         stages=analysis.stage_overview(session, source_id),
         latest_run_id=runs[0].id if runs else None,
         params=params,
@@ -186,19 +207,62 @@ def _candidate(session: Session, candidate_id: int) -> Candidate:
     return c
 
 
-def _card(request: Request, session: Session, c: Candidate, error: str | None = None):
+def _card_items(
+    session: Session, cands: list[tuple[Candidate, CandidateFeedback | None]], p: RankingParams
+) -> list[dict]:
+    ids = [c.id for c, _ in cands]
+    enr = enrichments_for(session, ids)
+    drafts = drafts_for(session, ids)
+    return [
+        {
+            "c": c,
+            "fb": fb,
+            "e": enr.get(c.id),
+            "drafts": drafts.get(c.id, {}),
+            "parts": score_parts(c, enr.get(c.id), p),
+        }
+        for c, fb in cands
+    ]
+
+
+def _sorted(items: list[dict], sort: str) -> list[dict]:
+    def final(i):
+        return -(i["c"].final_score if i["c"].final_score is not None else i["parts"].final)
+
+    keys = {
+        "final": final,
+        "detect": lambda i: -i["c"].score,
+        "ia": lambda i: (i["parts"].llm is None, -(i["parts"].llm or 0), -i["c"].score),
+        "time": lambda i: i["c"].eff_start,
+    }
+    return sorted(items, key=keys.get(sort, final))
+
+
+def _card(
+    request: Request,
+    session: Session,
+    c: Candidate,
+    error: str | None = None,
+    notice: str | None = None,
+):
+    settings: Settings = request.app.state.settings
     fb = session.exec(
         select(CandidateFeedback).where(CandidateFeedback.candidate_id == c.id)
     ).first()
+    run = session.get(AnalysisRun, c.analysis_run_id)
+    p = RankingParams.from_run(run.params, settings) if run else RankingParams()
+    item = _card_items(session, [(c, fb)], p)[0]
     return render(
         request,
         "analysis/_candidate.html",
-        c=c,
-        fb=fb,
+        item=item,
         source_id=c.source_id,
         signals=SIGNALS,
         signal_labels=SIGNAL_LABELS,
+        draft_platforms=DRAFT_PLATFORMS,
+        draft_labels=DRAFT_LABELS,
         card_error=error,
+        card_notice=notice,
     )
 
 
@@ -266,3 +330,112 @@ async def candidate_adjust(
     session.add(c)
     session.commit()
     return _card(request, session, c)
+
+
+# --- step 3: AI enrichment, ranking, drafts ---------------------------------------------------
+
+
+@router.post("/fontes/{source_id}/enriquecer")
+async def enrich_source(request: Request, source_id: int, session: SessionDep):
+    _source(session, source_id)
+    form = await request.form()
+    model = str(form.get("model", "")).strip() or None
+    try:
+        k = int(str(form.get("k", "")).strip() or 0) or None
+    except ValueError:
+        k = None
+    try:
+        job = analysis.enqueue_enrich(session, source_id, model=model, k=k)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return redirect(f"/fontes/{source_id}", e.message)
+    return redirect(f"/fontes/{source_id}", f"Enriquecimento com IA na fila (job #{job.id}).")
+
+
+@router.post("/candidatos/{candidate_id}/regerar")
+async def regenerate_candidate(request: Request, candidate_id: int, session: SessionDep):
+    c = _candidate(session, candidate_id)
+    form = await request.form()
+    model = str(form.get("model", "")).strip() or None
+    try:
+        analysis.enqueue_enrich(
+            session,
+            c.source_id,
+            model=model,
+            candidate_ids=[c.id],
+            instruction=str(form.get("instruction", "")),
+            overwrite_edited=form.get("overwrite_edited") == "on",
+        )
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return _card(request, session, c, e.message)
+    return _card(request, session, c, notice="Regerando com IA… recarregue a página em instantes.")
+
+
+@router.post("/fontes/{source_id}/ordenacao")
+async def set_ranking_route(
+    request: Request, source_id: int, session: SessionDep, settings: SettingsDep
+):
+    _source(session, source_id)
+    form = await request.form()
+    run = _selected_run(session, source_id, int(form["run"]) if form.get("run") else None)
+    if run is None:
+        return redirect(f"/fontes/{source_id}", "Analise a fonte primeiro.")
+
+    def num(name: str, lo: float, hi: float) -> float | None:
+        raw = str(form.get(name, "")).strip().replace(",", ".")
+        try:
+            return min(hi, max(lo, float(raw))) if raw else None
+        except ValueError:
+            return None
+
+    current = RankingParams.from_run(run.params, settings)
+    data = current.model_dump()
+    for name, lo, hi in (
+        ("w_detect", 0, 1), ("w_llm", 0, 1), ("penalty_needs_context", 0, 50),
+        ("penalty_low_standalone", 0, 50), ("low_standalone_threshold", 0, 10),
+    ):  # fmt: skip
+        v = num(name, lo, hi)
+        if v is not None:
+            data[name] = v
+    if data["w_detect"] + data["w_llm"] <= 0:
+        return redirect(f"/fontes/{source_id}", "Pelo menos um dos pesos precisa ser maior que 0.")
+    set_ranking(session, run, RankingParams(**data), settings)
+    session.commit()
+    return redirect(f"/fontes/{source_id}?run={run.id}", "Ordem recalculada (sem chamar a IA).")
+
+
+@router.post("/fontes/{source_id}/jogo")
+async def set_game(request: Request, source_id: int, session: SessionDep):
+    source = _source(session, source_id)
+    game = " ".join(str((await request.form()).get("game", "")).split())[:60]
+    source.game = game or None
+    source.updated_at = utcnow()
+    session.add(source)
+    session.commit()
+    return redirect(f"/fontes/{source_id}", f"Jogo definido: {game or 'padrão'}.")
+
+
+@router.post("/rascunhos/{draft_id}")
+async def save_draft(request: Request, draft_id: int, session: SessionDep):
+    d = session.get(PostDraft, draft_id)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Rascunho não encontrado")
+    form = await request.form()
+    if "title" in form:
+        d.title = clean_text(str(form["title"]), one_line=True)[:100]
+    if "description" in form:
+        d.description = clean_text(str(form["description"]))[:5000]
+    if "hashtags" in form:
+        raw = str(form["hashtags"]).replace(",", " ").split()
+        d.hashtags = clean_hashtags(raw, max_n=30)
+    d.edited_by_user = True
+    d.updated_at = utcnow()
+    session.add(d)
+    session.commit()
+    return HTMLResponse(
+        f'<span class="saved">salvo {utcnow().astimezone().strftime("%H:%M:%S")} · '
+        f"{' '.join(d.hashtags)}</span>"
+    )

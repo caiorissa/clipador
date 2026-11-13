@@ -59,12 +59,60 @@
 
   <div class="analysis-grid">
     <section>
-      <h2>Candidatos ({{ candidates|length }})</h2>
+      <div class="page-head compact">
+        <h2>Candidatos ({{ candidates|length }})</h2>
+        <form method="get" class="inline-form">
+          {% if pinned_run %}<input type="hidden" name="run" value="{{ run.id }}">{% endif %}
+          <label class="small muted">Ordenar por
+            <select name="sort" onchange="this.form.submit()">
+              {% for key, label in sorts.items() %}<option value="{{ key }}" {{ 'selected' if key == sort }}>{{ label }}</option>{% endfor %}
+            </select>
+          </label>
+        </form>
+      </div>
+      <div class="flash warn small copyright">🎵 Antes de postar, confira a música de fundo: a IA não detecta música com direitos autorais, e isso pode derrubar ou desmonetizar o vídeo.</div>
       {% if not candidates %}<div class="empty">Nenhum candidato. Tente baixar a altura mínima dos picos ou mudar o preset.</div>{% endif %}
       <div class="cand-list">
-        {% for c, fb in candidates %}{% include "analysis/_candidate.html" %}{% endfor %}
+        {% for item in items %}{% include "analysis/_candidate.html" %}{% endfor %}
       </div>
     </section>
+
+    <div class="side">
+    <aside class="card ai-panel">
+      <h2>IA local (Ollama)</h2>
+      <div hx-get="/sistema/ollama" hx-trigger="load" hx-swap="innerHTML"><span class="small muted">verificando o Ollama…</span></div>
+      {% if enrich_art and enrich_art.summary %}
+        <p class="small muted">Último enriquecimento: {{ enrich_art.summary.get('model') }} · {{ enrich_art.summary.get('ok', 0) }} avaliados, {{ enrich_art.summary.get('cached', 0) }} do cache, {{ enrich_art.summary.get('failed', 0) }} falharam{% if enrich_art.summary.get('avg_latency_ms') %} · {{ (enrich_art.summary.avg_latency_ms / 1000)|round(1) }} s/candidato{% endif %}</p>
+      {% endif %}
+      <form method="post" action="/fontes/{{ source.id }}/enriquecer">
+        <div class="grid2">
+          <label>Modelo<input name="model" value="{{ llm_model }}"></label>
+          <label>Candidatos (K)<input name="k" value="{{ enrich_k }}" inputmode="numeric"></label>
+        </div>
+        <button class="btn primary">🤖 Enriquecer com IA</button>
+      </form>
+      <form method="post" action="/fontes/{{ source.id }}/jogo" class="inline-form">
+        <input name="game" value="{{ game }}" aria-label="Jogo" placeholder="Jogo (ex.: GTA 6)">
+        <button class="btn small">Salvar jogo</button>
+      </form>
+      {% if ranking %}
+      <form method="post" action="/fontes/{{ source.id }}/ordenacao" class="ranking">
+        <input type="hidden" name="run" value="{{ run.id }}">
+        <h3>Nota final</h3>
+        <label class="slider">Peso da detecção <output id="o_wd">{{ ranking.w_detect }}</output>
+          <input type="range" name="w_detect" min="0" max="1" step="0.05" value="{{ ranking.w_detect }}" oninput="o_wd.value=this.value"></label>
+        <label class="slider">Peso da IA <output id="o_wl">{{ ranking.w_llm }}</output>
+          <input type="range" name="w_llm" min="0" max="1" step="0.05" value="{{ ranking.w_llm }}" oninput="o_wl.value=this.value"></label>
+        <div class="grid2">
+          <label>Penalidade "precisa de contexto"<input name="penalty_needs_context" value="{{ ranking.penalty_needs_context }}" inputmode="decimal"></label>
+          <label>Penalidade "não faz sentido sozinho"<input name="penalty_low_standalone" value="{{ ranking.penalty_low_standalone }}" inputmode="decimal"></label>
+          <label>…se "faz sentido sozinho" &lt;<input name="low_standalone_threshold" value="{{ ranking.low_standalone_threshold }}" inputmode="decimal"></label>
+        </div>
+        <button class="btn">Reordenar</button>
+        <p class="small muted">Reordenar não chama a IA: recalcula na hora.</p>
+      </form>
+      {% endif %}
+    </aside>
 
     <aside class="card tuning">
       <h2>Ajustes da detecção</h2>
@@ -92,6 +140,7 @@
         <p class="small muted">Reanalisar roda só a detecção (usa a transcrição e as features em cache): leva segundos.</p>
       </form>
     </aside>
+    </div>
   </div>
 {% else %}
   <div class="empty">Esta fonte ainda não foi analisada. Clique em <strong>Analisar</strong>: extrai o áudio, transcreve na GPU, baixa o chat (se houver) e detecta os momentos.</div>
@@ -108,6 +157,8 @@
     if (ev.target.id !== "stages") return;
     const box = ev.target.querySelector(".stages");
     if (!box || box.dataset.active === "1" || PINNED) return;
+    if (window.ENRICH_STAMP === undefined) window.ENRICH_STAMP = {{ enrich_art.updated_at.timestamp()|round|int if enrich_art else 0 }};
+    if (box.dataset.enrich && Number(box.dataset.enrich) !== window.ENRICH_STAMP) { location.reload(); return; }
     const latest = box.dataset.latestRun ? Number(box.dataset.latestRun) : null;
     if (latest && latest !== CURRENT_RUN) location.reload();
   });
@@ -142,6 +193,26 @@
     v.dataset.start = s; v.dataset.end = e;
     if (b.dataset.preview !== undefined) { v.currentTime = s; v.play(); }
   });
+
+  // --- post drafts: pick a suggested title, live character counters ---
+  document.body.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-title-option]");
+    if (!b) return;
+    const input = b.closest("form.draft").querySelector("[name=title]");
+    input.value = b.dataset.titleOption;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    updateCounts(b.closest("form.draft"));
+  });
+  function updateCounts(form) {
+    form.querySelectorAll(".count").forEach((el) => {
+      const f = form.querySelector("[name=" + el.dataset.for + "]"); if (!f) return;
+      const n = f.value.length, max = Number(el.dataset.max);
+      el.textContent = n + "/" + max; el.classList.toggle("over", n > max);
+    });
+  }
+  document.querySelectorAll("form.draft").forEach(updateCounts);
+  document.body.addEventListener("input", (ev) => { const f = ev.target.closest("form.draft"); if (f) updateCounts(f); });
+  document.body.addEventListener("htmx:afterSwap", (ev) => { const r = ev.target.closest ? ev.target : document; (r.querySelectorAll ? r : document).querySelectorAll("form.draft").forEach(updateCounts); });
 
   // --- tuning form: preset fills sliders; sliders mark custom ---
   const preset = document.getElementById("preset");

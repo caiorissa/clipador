@@ -1,5 +1,6 @@
 {# Polled every 2 s. data-latest-run lets the page reload itself when a new analysis finishes. #}
-<div class="stages" data-latest-run="{{ latest_run_id or '' }}"
+{% set enrich_art = (stages|selectattr('stage', 'equalto', 'enrich')|map(attribute='artifact')|first) %}
+<div class="stages" data-latest-run="{{ latest_run_id or '' }}" data-enrich="{{ enrich_art.updated_at.timestamp()|round|int if enrich_art else '' }}"
      data-active="{{ '1' if stages|selectattr('active')|list else '0' }}">
   {% for st in stages %}
     {% set j = st.job %}{% set a = st.artifact %}
@@ -25,6 +26,7 @@
           {% if st.stage == 'transcribe' and a.summary.words is defined %}· {{ a.summary.words }} palavras · {{ a.summary.language }}{% if a.summary.realtime_factor %} · {{ a.summary.realtime_factor }}x tempo real{% endif %}{% endif %}
           {% if st.stage == 'fetch_chat' and a.summary.messages is defined %}· {{ a.summary.messages }} mensagens{% endif %}
           {% if st.stage == 'detect' and a.summary.candidates is defined %}· {{ a.summary.candidates }} candidatos{% endif %}
+          {% if st.stage == 'enrich' and a.summary.model is defined %}· {{ a.summary.model }} · {{ a.summary.ok }} ok / {{ a.summary.failed }} falhas{% endif %}
         </div>
       {% else %}
         <span class="status status-pending">—</span>

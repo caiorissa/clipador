@@ -23,3 +23,10 @@ def system_page(request: Request, settings: SettingsDep):
 def system_checks(request: Request, settings: SettingsDep):
     # Sync route: FastAPI runs it in a thread pool (doctor spawns ffmpeg/nvidia-smi).
     return render(request, "system/_checks.html", results=doctor.run_all(settings))
+
+
+@router.get("/sistema/ollama")
+def ollama_partial(request: Request, settings: SettingsDep):
+    from clipador.llm.client import ollama_status
+
+    return render(request, "system/_ollama.html", st=ollama_status(settings))

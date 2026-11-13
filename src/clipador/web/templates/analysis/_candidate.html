@@ -1,18 +1,39 @@
-{% set s = c.eff_start %}{% set e = c.eff_end %}
+{% set c = item.c %}{% set fb = item.fb %}{% set e = item.e %}{% set parts = item.parts %}
+{% set s = c.eff_start %}{% set en = c.eff_end %}
+{% set severe = ['discurso_de_odio_ou_ofensa', 'violencia_real_ou_autolesao', 'conteudo_sexual', 'dados_pessoais_ou_doxxing'] %}
+{% set medium = ['xingamento_pesado', 'apostas_ou_promocao'] %}
+{% set alert_labels = {'xingamento_pesado': 'xingamento pesado', 'discurso_de_odio_ou_ofensa': 'ódio/ofensa', 'violencia_real_ou_autolesao': 'violência real/autolesão', 'conteudo_sexual': 'conteúdo sexual', 'dados_pessoais_ou_doxxing': 'dados pessoais', 'apostas_ou_promocao': 'apostas/promoção', 'outro': 'outro'} %}
 <article class="cand status-{{ c.status }}" id="cand-{{ c.id }}" data-id="{{ c.id }}">
   <div class="cand-head">
-    <span class="rank">#{{ c.rank }}</span>
-    <span class="score" title="Nota final (0 a 100)">{{ c.score|round|int }}</span>
+    <span class="rank" title="posição pela nota final (detecção: #{{ c.rank }})">#{{ c.final_rank or c.rank }}</span>
+    <span class="score" title="Nota final (0 a 100)">{{ (c.final_score if c.final_score is not none else parts.final)|round|int }}</span>
+    <span class="subscores small">
+      detecção <strong>{{ c.score|round|int }}</strong> ·
+      IA {% if parts.llm is not none %}<strong>{{ parts.llm|round|int }}</strong>{% elif e and e.status == 'llm_failed' %}<span class="error-text" title="{{ e.error }}">falhou</span>{% else %}—{% endif %}
+      {% if parts.penalty %}· <span class="warn-text">−{{ parts.penalty|round|int }}</span>{% endif %}
+    </span>
     <strong>{{ s|hms }}</strong>
-    <span class="muted small">{{ (e - s)|round(1) }} s{% if c.user_start is not none %} · ajustado{% endif %}</span>
+    <span class="muted small">{{ (en - s)|round(1) }} s{% if c.user_start is not none %} · ajustado{% endif %}</span>
     {% if c.status == 'approved' %}<span class="badge ok">aprovado</span>{% elif c.status == 'rejected' %}<span class="badge fail">rejeitado</span>{% endif %}
     {% if fb %}<span class="badge {{ 'ok' if fb.verdict == 'bom' else 'fail' }}">{{ fb.verdict }}</span>{% endif %}
+    {% if e and e.precisa_de_contexto %}<span class="badge warn" title="Só faz sentido com o que veio antes">precisa de contexto</span>{% endif %}
   </div>
   {% if card_error %}<div class="flash error small">{{ card_error }}</div>{% endif %}
+  {% if card_notice %}<div class="flash small">{{ card_notice }}</div>{% endif %}
+  {% if e and e.status == 'ok' %}
+    <p class="motivo small">🤖 {{ e.motivo }}</p>
+    {% if e.alertas %}
+    <div class="alerts">
+      {% for a in e.alertas %}
+        <span class="alert-badge {{ 'sev-high' if a.tipo in severe else ('sev-mid' if a.tipo in medium else 'sev-low') }}" title="{{ a.trecho }}">⚠ {{ alert_labels.get(a.tipo, a.tipo) }}{% if a.trecho %}: “{{ a.trecho }}”{% endif %}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endif %}
   <div class="cand-body">
     <video class="clip-player" controls preload="none" playsinline
-           data-start="{{ s }}" data-end="{{ e }}"
-           src="/fontes/{{ source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(e) }}"></video>
+           data-start="{{ s }}" data-end="{{ en }}"
+           src="/fontes/{{ source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(en) }}"></video>
     <div class="cand-info">
       <div class="breakdown">
         {% for k in signals %}{% set v = c.breakdown.get(k) %}
@@ -22,6 +43,13 @@
           <span class="bd-val small">{{ v|round|int if v is not none else '—' }}</span>
         </div>
         {% endfor %}
+        {% if e and e.status == 'ok' %}
+        <details class="ai-scores small"><summary>notas da IA</summary>
+          {% for k, label in [('humor','humor'),('surpresa_choque','surpresa'),('habilidade','habilidade'),('emocao','emoção'),('faz_sentido_sozinho','faz sentido sozinho'),('forca_do_inicio','força do início')] %}
+            <span class="ai-score">{{ label }} <strong>{{ e.scores.get(k, '—') }}</strong></span>
+          {% endfor %}
+        </details>
+        {% endif %}
       </div>
       <p class="snippet">{{ c.transcript_snippet or '(sem fala transcrita neste trecho)' }}</p>
       <div class="cand-actions">
@@ -38,7 +66,7 @@
         </label>
         <label>Fim (s)
           <span class="nudge"><button type="button" class="btn small" data-nudge="end" data-d="-1">−1</button>
-          <input name="user_end" value="{{ '%.2f'|format(e) }}" inputmode="decimal">
+          <input name="user_end" value="{{ '%.2f'|format(en) }}" inputmode="decimal">
           <button type="button" class="btn small" data-nudge="end" data-d="1">+1</button></span>
         </label>
         <button type="button" class="btn small" data-preview>Prévia</button>
@@ -47,4 +75,38 @@
       </form>
     </div>
   </div>
+
+  {% if item.drafts %}
+  <details class="drafts" {{ 'open' if c.status == 'approved' }}>
+    <summary>Pacote de postagem{% if e and e.status == 'ok' %} (IA){% else %} (rascunho simples){% endif %}</summary>
+    {% if e and e.texto_de_abertura %}<p class="small">Texto de abertura (2 primeiros segundos): <strong>{{ e.texto_de_abertura }}</strong></p>{% endif %}
+    <div class="draft-grid">
+    {% for p in draft_platforms %}{% set d = item.drafts.get(p) %}{% if d %}
+      <form class="draft" hx-post="/rascunhos/{{ d.id }}" hx-trigger="change delay:400ms, submit" hx-target="find .draft-status" hx-swap="innerHTML">
+        <h4>{{ draft_labels[p] }} {% if d.edited_by_user %}<span class="badge small">editado</span>{% endif %}</h4>
+        {% if p == 'youtube' %}
+          <label>Título <span class="count" data-for="title" data-max="70"></span>
+            <input name="title" value="{{ d.title }}" maxlength="100">
+          </label>
+          {% if e and e.titulos %}
+          <div class="title-options">
+            {% for t in e.titulos %}<button type="button" class="btn small" data-title-option="{{ t }}">{{ t }}</button>{% endfor %}
+          </div>
+          {% endif %}
+        {% endif %}
+        <label>{{ 'Descrição' if p == 'youtube' else 'Legenda' }} <span class="count" data-for="description" data-max="{{ 150 if p == 'tiktok' else (2200 if p == 'instagram' else 5000) }}"></span>
+          <textarea name="description" rows="{{ 3 if p == 'tiktok' else 5 }}">{{ d.description }}</textarea>
+        </label>
+        <label>Hashtags <input name="hashtags" value="{{ d.hashtags|join(' ') }}"></label>
+        <div class="draft-status small muted"></div>
+      </form>
+    {% endif %}{% endfor %}
+    </div>
+    <form class="regen" hx-post="/candidatos/{{ c.id }}/regerar" hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">
+      <input name="instruction" placeholder="instrução opcional: mais curto, mais engraçado, sem gíria…" maxlength="200">
+      <label class="check small"><input type="checkbox" name="overwrite_edited"> sobrescrever o que eu editei</label>
+      <button class="btn small">🔁 Regerar com IA</button>
+    </form>
+  </details>
+  {% endif %}
 </article>

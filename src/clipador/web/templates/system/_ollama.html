@@ -1,0 +1,12 @@
+<div class="ollama {{ 'ok' if st.ok and st.configured_installed else 'off' }}">
+  {% if st.ok and st.configured_installed %}
+    <span class="status check-ok">● IA local ok</span>
+    <span class="small muted">modelo {{ st.configured }} · instalados: {{ st.models|join(', ') }}</span>
+  {% elif st.ok %}
+    <span class="status check-warn">● {{ st.message }}</span>
+    <div class="small">{{ st.hint }}{% if st.models %} Instalados: {{ st.models|join(', ') }}.{% endif %}</div>
+  {% else %}
+    <span class="status check-warn">● IA local fora do ar</span>
+    <div class="small">{{ st.message }} {{ st.hint }} Sem IA, tudo continua funcionando com a nota de detecção e títulos simples.</div>
+  {% endif %}
+</div>
