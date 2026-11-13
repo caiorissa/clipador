@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Revisão{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% macro keep_filters() %}{% for k, v in f.params().items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endmacro %}
+{% block content %}
+<div class="page-head compact review-head">
+  <div>
+    <h1>Revisão</h1>
+    <div class="small muted" data-progress>
+      {% if progress.position %}<strong class="pos">{{ progress.position }} de {{ progress.total }}</strong> · {% endif %}
+      {{ progress.reviewed }} revisados · <span class="ok-text">✓ {{ progress.approved }}</span> · <span class="error-text">✗ {{ progress.rejected }}</span> · ⏭ {{ progress.skipped }} pulados · {{ progress.suggested }} sem decisão
+    </div>
+  </div>
+  <div class="head-actions">
+    {% if cand and progress.prev_id %}<a class="btn small" href="/revisao?{{ f.query(c=progress.prev_id) }}" data-shortcut="anterior" title="voltar ao anterior (Backspace)">← Anterior</a>{% endif %}
+    {% if cand and progress.next_id %}<a class="btn small" href="/revisao?{{ f.query(c=progress.next_id) }}" title="ver o seguinte da lista, sem decidir">Seguinte →</a>{% endif %}
+    <form method="post" action="/revisao/desfazer" class="inline" id="undo-form">{{ keep_filters() }}<button class="btn small" data-shortcut="z" title="desfazer a última decisão (Z)">↶ Desfazer (Z)</button></form>
+    <button type="button" class="btn small" data-help-toggle title="atalhos (?)">? Atalhos</button>
+  </div>
+</div>
+
+<details class="card review-filters" {{ 'open' if f.params() }}>
+  <summary>Filtros e ordem</summary>
+  <form method="get" action="/revisao" class="filters-row">
+    <label>Fonte <select name="fonte"><option value="">todas</option>
+      {% for s in sources %}<option value="{{ s.id }}" {{ 'selected' if f.source_id == s.id }}>#{{ s.id }} {{ (s.title or s.url)[:50] }}</option>{% endfor %}</select></label>
+    <label>Streamer <select name="streamer"><option value="">todos</option>
+      {% for s in streamers %}<option value="{{ s.id }}" {{ 'selected' if f.streamer_id == s.id }}>{{ s.display_name }}</option>{% endfor %}</select></label>
+    <label>Plataforma <select name="plataforma"><option value="">todas</option>
+      {% for p in platforms %}<option value="{{ p }}" {{ 'selected' if f.platform == p }}>{{ PLATFORM_LABELS[p] }}</option>{% endfor %}</select></label>
+    <label>Nota final mín. <input name="nota_min" inputmode="decimal" size="4" value="{{ '%g'|format(f.min_score) if f.min_score is not none else '' }}"></label>
+    <label>Status <select name="status">{% for k, label in status_filters.items() %}<option value="{{ k }}" {{ 'selected' if f.status == k }}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Ordem <select name="ordem">{% for k, label in orders.items() %}<option value="{{ k }}" {{ 'selected' if f.order == k }}>{{ label }}</option>{% endfor %}</select></label>
+    <button class="btn small primary">Aplicar</button>
+  </form>
+</details>
+
+{% if not cand %}
+  <div class="empty">Nada para revisar com estes filtros. 🎉 {% if progress.total %}Todos os {{ progress.total }} candidatos já têm decisão.{% else %}Analise uma fonte primeiro.{% endif %}</div>
+{% else %}
+{% set c = cand %}{% set e = item.e %}{% set parts = item.parts %}
+<div id="review" class="review" data-review data-candidate="{{ c.id }}" data-source="{{ c.source_id }}"
+     data-start="{{ c.eff_start }}" data-end="{{ c.eff_end }}" data-status="{{ c.status }}">
+  <script type="application/json" id="review-data">{{ live|tojson }}</script>
+
+  <section class="review-stage-col">
+    <div class="stage-wrap">
+      <div class="stage" id="stage" data-layout="{{ live.layout }}">
+        <canvas id="stage-canvas" width="540" height="960"></canvas>
+        <div class="stage-opening" id="stage-opening"></div>
+        <div class="stage-credit" id="stage-credit"></div>
+        <div class="stage-caption" id="stage-caption"></div>
+        <div class="stage-safe top"></div><div class="stage-safe bottom"></div>
+        <div class="stage-badge">PRÉVIA AO VIVO · APROXIMADA</div>
+      </div>
+      <video id="src-video" preload="auto" playsinline src="/fontes/{{ c.source_id }}/video#t={{ '%.2f'|format(c.eff_start) }}"></video>
+    </div>
+    <div class="player-row">
+      <button type="button" class="btn small" data-shortcut="space" id="play-btn">▶ Play (Espaço)</button>
+      <span class="small mono" id="time-readout">—</span>
+      <button type="button" class="btn small" data-shortcut="l" id="layout-btn" title="alternar layout (L)">Layout: <span id="layout-label">{{ layout_labels[live.layout] }}</span> (L)</button>
+    </div>
+    <p class="small muted">A prévia ao vivo é <strong>aproximada</strong> (desenhada no navegador). O que será exportado é a <strong>prévia fiel</strong> (render real, tecla <kbd>P</kbd>).</p>
+    {% if live.layout_warning %}<div class="flash warn small">{{ live.layout_warning }}</div>{% endif %}
+    <div class="faithful card" id="faithful">
+      <div class="small"><strong>Prévia fiel (540×960)</strong> <span id="faithful-status" class="muted">verificando…</span></div>
+      <video id="faithful-video" controls preload="none" playsinline hidden></video>
+      <button type="button" class="btn small" data-shortcut="p" id="faithful-btn">🎞 Gerar prévia fiel (P)</button>
+    </div>
+  </section>
+
+  <section class="review-main-col">
+    <div class="card">
+      <div class="cand-head">
+        <span class="rank">#{{ c.final_rank or c.rank }}</span>
+        <span class="score" title="Nota final">{{ (c.final_score if c.final_score is not none else parts.final)|round|int }}</span>
+        <span class="subscores small">detecção <strong>{{ c.score|round|int }}</strong> · IA {% if parts.llm is not none %}<strong>{{ parts.llm|round|int }}</strong>{% else %}—{% endif %}{% if parts.penalty %} · <span class="warn-text">−{{ parts.penalty|round|int }}</span>{% endif %}</span>
+        <span class="badge">{{ status_labels.get(c.status, c.status) }}</span>
+        {% if e and e.precisa_de_contexto %}<span class="badge warn">precisa de contexto</span>{% endif %}
+      </div>
+      <div class="small muted">
+        <a href="/fontes/{{ c.source_id }}#cand-{{ c.id }}">{{ (source.title or source.url)[:70] }}</a> · {{ source.platform|platform_label }} · {{ streamer.display_name if streamer }} · {{ c.eff_start|hms }}
+      </div>
+      {% include "analysis/_alerts.html" %}
+      {% if item.title_suggestion %}<p class="small">Título sugerido: <strong>{{ item.title_suggestion }}</strong></p>{% endif %}
+      {% include "analysis/_breakdown.html" %}
+      <p class="snippet small">{{ c.transcript_snippet or '(sem fala transcrita neste trecho)' }}</p>
+    </div>
+
+    <div class="card cut">
+      <div class="cut-head">
+        <h3>Corte</h3>
+        <label class="check small"><input type="checkbox" id="snap" checked> encaixar nas palavras</label>
+        <span class="small muted" id="range-status"></span>
+      </div>
+      <canvas id="timeline-canvas" class="timeline-canvas" height="110"></canvas>
+      <div class="cut-fields">
+        <button type="button" class="btn small" data-context="start" title="+5 s de contexto antes">⟵ +5 s</button>
+        <label>Início <input id="f-start" inputmode="decimal" size="8" value="{{ '%.2f'|format(c.eff_start) }}"></label>
+        <span class="mono small" id="dur-readout"></span>
+        <label>Fim <input id="f-end" inputmode="decimal" size="8" value="{{ '%.2f'|format(c.eff_end) }}"></label>
+        <button type="button" class="btn small" data-context="end" title="+5 s de contexto depois">+5 s ⟶</button>
+        <button type="button" class="btn small" id="reset-range" {{ 'hidden' if c.user_start is none }}>Voltar ao sugerido</button>
+      </div>
+      <div class="small warn-text" id="range-warnings"></div>
+    </div>
+
+    <div class="card decide">
+      <form method="post" action="/revisao/{{ c.id }}/decisao" id="decision-form">
+        {{ keep_filters() }}
+        <input type="hidden" name="action" value="">
+        <input type="hidden" name="reason_tag" value="">
+        <input name="note" maxlength="500" placeholder="nota opcional (vai para o feedback)" class="note">
+        <div class="decide-buttons">
+          <button type="button" class="btn primary" data-shortcut="a" data-action="approve">✓ Aprovar (A)</button>
+          <button type="button" class="btn danger" data-shortcut="r" data-action="reject">✗ Rejeitar (R)</button>
+          <button type="button" class="btn" data-shortcut="s" data-action="skip">⏭ Pular (S)</button>
+          {% if c.status not in ('suggested',) %}<button type="button" class="btn small" data-action="reopen">Reabrir</button>{% endif %}
+        </div>
+        <div class="reasons" id="reasons" hidden>
+          <div class="small muted">Motivo da rejeição (tecla do número; Esc cancela):</div>
+          {% for k in reason_keys %}<button type="button" class="btn small" data-reason="{{ k }}" data-shortcut="{{ loop.index }}"><kbd>{{ loop.index }}</kbd> {{ reasons[k] }}</button>{% endfor %}
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endif %}
+
+<section class="card history">
+  <h3>Histórico</h3>
+  {% if not history %}<p class="small muted">Nenhuma decisão ainda.</p>{% endif %}
+  <ol class="history-list small">
+    {% for h in history %}
+      <li class="{{ 'undone' if h.undone }}">{{ h.d.created_at|dt }} · {{ h.label }} {% if h.c %}<a href="/revisao?{{ f.query(c=h.c.id) }}">#{{ h.c.final_rank or h.c.rank }} da fonte {{ h.c.source_id }}</a>{% endif %}{% if h.d.reason_tag %} ({{ reasons.get(h.d.reason_tag, h.d.reason_tag) }}){% endif %}{% if h.undone %} · <em>desfeito</em>{% endif %}</li>
+    {% endfor %}
+  </ol>
+</section>
+
+<div class="help-overlay" id="help" hidden>
+  <div class="card">
+    <h3>Atalhos de teclado</h3>
+    <table class="small">
+      <tr><td><kbd>A</kbd></td><td>aprovar (e já enfileira o render final)</td></tr>
+      <tr><td><kbd>R</kbd> + <kbd>1</kbd>…<kbd>7</kbd></td><td>rejeitar com motivo</td></tr>
+      <tr><td><kbd>S</kbd></td><td>pular (volta no fim da fila)</td></tr>
+      <tr><td><kbd>Z</kbd></td><td>desfazer a última decisão (repita para voltar mais)</td></tr>
+      <tr><td><kbd>Backspace</kbd></td><td>voltar ao candidato anterior</td></tr>
+      <tr><td><kbd>Espaço</kbd></td><td>play / pause</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>voltar / avançar 2 s no player</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>início −/+ 0,5 s (<kbd>Shift</kbd> = 2 s)</td></tr>
+      <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>fim −/+ 0,5 s (<kbd>Shift</kbd> = 2 s)</td></tr>
+      <tr><td><kbd>L</kbd></td><td>alternar o layout</td></tr>
+      <tr><td><kbd>P</kbd></td><td>gerar a prévia fiel (render real)</td></tr>
+      <tr><td><kbd>?</kbd></td><td>mostrar/esconder esta ajuda</td></tr>
+    </table>
+    <p class="small muted">Os atalhos não funcionam enquanto você digita num campo de texto (Esc sai do campo).</p>
+    <button type="button" class="btn small" data-help-toggle>Fechar</button>
+  </div>
+</div>
+
+<style>
+@font-face { font-family: "ClipCaption"; src: url("/revisao/fonte.ttf"); }
+</style>
+<script src="/static/review.js" defer></script>
+{% endblock %}

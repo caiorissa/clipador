@@ -1,0 +1,14 @@
+{# AI motive + alerts with the quoted excerpt. Needs: e (CandidateEnrichment or none). #}
+{% set severe = ['discurso_de_odio_ou_ofensa', 'violencia_real_ou_autolesao', 'conteudo_sexual', 'dados_pessoais_ou_doxxing'] %}
+{% set medium = ['xingamento_pesado', 'apostas_ou_promocao'] %}
+{% set alert_labels = {'xingamento_pesado': 'xingamento pesado', 'discurso_de_odio_ou_ofensa': 'ódio/ofensa', 'violencia_real_ou_autolesao': 'violência real/autolesão', 'conteudo_sexual': 'conteúdo sexual', 'dados_pessoais_ou_doxxing': 'dados pessoais', 'apostas_ou_promocao': 'apostas/promoção', 'outro': 'outro'} %}
+{% if e and e.status == 'ok' %}
+  <p class="motivo small">🤖 {{ e.motivo }}</p>
+  {% if e.alertas %}
+  <div class="alerts">
+    {% for a in e.alertas %}
+      <span class="alert-badge {{ 'sev-high' if a.tipo in severe else ('sev-mid' if a.tipo in medium else 'sev-low') }}" title="{{ a.trecho }}">⚠ {{ alert_labels.get(a.tipo, a.tipo) }}{% if a.trecho %}: “{{ a.trecho }}”{% endif %}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endif %}

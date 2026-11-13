@@ -1,8 +1,5 @@
 {% set c = item.c %}{% set fb = item.fb %}{% set e = item.e %}{% set parts = item.parts %}
 {% set s = c.eff_start %}{% set en = c.eff_end %}
-{% set severe = ['discurso_de_odio_ou_ofensa', 'violencia_real_ou_autolesao', 'conteudo_sexual', 'dados_pessoais_ou_doxxing'] %}
-{% set medium = ['xingamento_pesado', 'apostas_ou_promocao'] %}
-{% set alert_labels = {'xingamento_pesado': 'xingamento pesado', 'discurso_de_odio_ou_ofensa': 'ódio/ofensa', 'violencia_real_ou_autolesao': 'violência real/autolesão', 'conteudo_sexual': 'conteúdo sexual', 'dados_pessoais_ou_doxxing': 'dados pessoais', 'apostas_ou_promocao': 'apostas/promoção', 'outro': 'outro'} %}
 <article class="cand status-{{ c.status }}" id="cand-{{ c.id }}" data-id="{{ c.id }}">
   <div class="cand-head">
     <span class="rank" title="posição pela nota final (detecção: #{{ c.rank }})">#{{ c.final_rank or c.rank }}</span>
@@ -20,37 +17,13 @@
   </div>
   {% if card_error %}<div class="flash error small">{{ card_error }}</div>{% endif %}
   {% if card_notice %}<div class="flash small">{{ card_notice }}</div>{% endif %}
-  {% if e and e.status == 'ok' %}
-    <p class="motivo small">🤖 {{ e.motivo }}</p>
-    {% if e.alertas %}
-    <div class="alerts">
-      {% for a in e.alertas %}
-        <span class="alert-badge {{ 'sev-high' if a.tipo in severe else ('sev-mid' if a.tipo in medium else 'sev-low') }}" title="{{ a.trecho }}">⚠ {{ alert_labels.get(a.tipo, a.tipo) }}{% if a.trecho %}: “{{ a.trecho }}”{% endif %}</span>
-      {% endfor %}
-    </div>
-    {% endif %}
-  {% endif %}
+  {% include "analysis/_alerts.html" %}
   <div class="cand-body">
     <video class="clip-player" controls preload="none" playsinline
            data-start="{{ s }}" data-end="{{ en }}"
            src="/fontes/{{ source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(en) }}"></video>
     <div class="cand-info">
-      <div class="breakdown">
-        {% for k in signals %}{% set v = c.breakdown.get(k) %}
-        <div class="bd-row">
-          <span class="bd-label">{{ signal_labels[k] }}</span>
-          <span class="bd-bar"><span class="bd-fill bd-{{ k }}" style="width: {{ v or 0 }}%"></span></span>
-          <span class="bd-val small">{{ v|round|int if v is not none else '—' }}</span>
-        </div>
-        {% endfor %}
-        {% if e and e.status == 'ok' %}
-        <details class="ai-scores small"><summary>notas da IA</summary>
-          {% for k, label in [('humor','humor'),('surpresa_choque','surpresa'),('habilidade','habilidade'),('emocao','emoção'),('faz_sentido_sozinho','faz sentido sozinho'),('forca_do_inicio','força do início')] %}
-            <span class="ai-score">{{ label }} <strong>{{ e.scores.get(k, '—') }}</strong></span>
-          {% endfor %}
-        </details>
-        {% endif %}
-      </div>
+      {% include "analysis/_breakdown.html" %}
       <p class="snippet">{{ c.transcript_snippet or '(sem fala transcrita neste trecho)' }}</p>
       <div class="cand-actions">
         <button class="btn small {{ 'on-ok' if fb and fb.verdict == 'bom' }}" hx-post="/candidatos/{{ c.id }}/feedback" hx-vals='{"verdict": "bom"}' hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">👍 Bom</button>

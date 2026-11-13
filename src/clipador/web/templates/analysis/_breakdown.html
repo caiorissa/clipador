@@ -1,0 +1,17 @@
+{# Detection breakdown bars + AI sub-scores. Needs: c, e, signals, signal_labels. #}
+<div class="breakdown">
+  {% for k in signals %}{% set v = c.breakdown.get(k) %}
+  <div class="bd-row">
+    <span class="bd-label">{{ signal_labels[k] }}</span>
+    <span class="bd-bar"><span class="bd-fill bd-{{ k }}" style="width: {{ v or 0 }}%"></span></span>
+    <span class="bd-val small">{{ v|round|int if v is not none else '—' }}</span>
+  </div>
+  {% endfor %}
+  {% if e and e.status == 'ok' %}
+  <details class="ai-scores small"><summary>notas da IA</summary>
+    {% for k, label in [('humor','humor'),('surpresa_choque','surpresa'),('habilidade','habilidade'),('emocao','emoção'),('faz_sentido_sozinho','faz sentido sozinho'),('forca_do_inicio','força do início')] %}
+      <span class="ai-score">{{ label }} <strong>{{ e.scores.get(k, '—') }}</strong></span>
+    {% endfor %}
+  </details>
+  {% endif %}
+</div>

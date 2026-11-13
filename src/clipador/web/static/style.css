@@ -261,7 +261,59 @@ tr.inactive td { opacity: .55; }
   background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: .85rem;
 }
 
+/* step 5: review (/revisao) */
+main.wide { max-width: 1400px; }
+.review { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.review-head .pos { color: var(--text); font-size: 1.05rem; }
+.ok-text { color: var(--ok); }
+.review-filters summary { cursor: pointer; font-weight: 600; }
+.filters-row { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: end; margin-top: .6rem; }
+.filters-row label { color: var(--muted); font-size: .82rem; display: flex; flex-direction: column; gap: .2rem; }
+.filters-row select, .filters-row input, .cut-fields input, .decide .note {
+  padding: .3rem .45rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: .85rem;
+}
+.stage-wrap { position: relative; }
+.stage { position: relative; width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 10px; overflow: hidden; user-select: none; }
+.stage canvas { width: 100%; height: 100%; display: block; }
+#src-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: 0; top: 0; }
+.stage-caption {
+  position: absolute; left: 5.5%; right: 5.5%; text-align: center; line-height: 1.12; font-family: "ClipCaption", Impact, sans-serif;
+  paint-order: stroke fill; text-wrap: balance; overflow-wrap: anywhere;
+}
+.stage-caption .hl { color: var(--hl); display: inline-block; }
+.stage-caption.mode-pop .hl { animation: cap-pop .18s ease-out; }
+@keyframes cap-pop { 50% { transform: scale(var(--pop)); } }
+.stage-opening, .stage-credit { position: absolute; left: 6.5%; right: 6.5%; text-align: center; font-family: "ClipCaption", Impact, sans-serif; color: #fff; }
+.stage-opening { background: rgba(0, 0, 0, .87); padding: .1em .3em; line-height: 1.15; }
+.stage-opening:empty, .stage-credit:empty { display: none; }
+.stage-credit { opacity: .9; text-decoration: underline; -webkit-text-stroke: 1px rgba(0, 0, 0, .55); }
+.stage-safe { position: absolute; left: 0; right: 0; pointer-events: none; background: repeating-linear-gradient(135deg, rgba(255,255,255,.05) 0 6px, transparent 6px 12px); }
+.stage-safe.top { top: 0; height: 10%; border-bottom: 1px dashed rgba(255,255,255,.18); }
+.stage-safe.bottom { bottom: 0; height: 20%; border-top: 1px dashed rgba(255,255,255,.18); }
+.stage-badge { position: absolute; top: .4rem; left: .4rem; font-size: .65rem; letter-spacing: .04em; background: rgba(0,0,0,.6); color: #ffe7a8; padding: .1rem .4rem; border-radius: 4px; }
+.player-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .5rem 0; }
+.mono { font-family: ui-monospace, Consolas, monospace; }
+.faithful video { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 8px; margin: .4rem 0; }
+.timeline-canvas { width: 100%; height: 110px; display: block; border-radius: 6px; touch-action: none; cursor: pointer; }
+.cut-head { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.cut-head h3 { margin: 0; }
+.cut-fields { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .5rem; }
+.cut-fields label { color: var(--muted); font-size: .85rem; }
+.decide .note { width: 100%; margin-bottom: .6rem; }
+.decide-buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
+.decide-buttons .btn { font-size: 1rem; padding: .5rem 1rem; }
+.reasons { margin-top: .7rem; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.reasons .small.muted { width: 100%; }
+kbd { font-family: ui-monospace, Consolas, monospace; font-size: .8em; padding: 0 .3em; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--bg); }
+.history-list { margin: 0; padding-left: 1.2rem; color: var(--muted); }
+.history-list li.undone { text-decoration: line-through; opacity: .6; }
+.help-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: grid; place-items: center; z-index: 50; }
+.help-overlay[hidden] { display: none; }
+.help-overlay .card { max-width: 520px; }
+.help-overlay td { padding: .15rem .6rem .15rem 0; }
+
 @media (max-width: 900px) {
+  .review { grid-template-columns: 1fr; }
   .analysis-grid { grid-template-columns: 1fr; }
   .render-grid { grid-template-columns: 1fr; }
   .tuning { position: static; }
