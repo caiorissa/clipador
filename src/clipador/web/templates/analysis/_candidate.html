@@ -76,6 +76,45 @@
     </div>
   </div>
 
+  <details class="render-box" {{ 'open' if c.status == 'approved' or item.clip }}>
+    <summary>Corte vertical 9:16{% if item.clip %} · <span class="status status-done">pronto</span>{% endif %}</summary>
+    <div class="render-grid">
+      {% if item.clip %}
+      <div class="render-out">
+        <video class="rendered" controls preload="none" playsinline src="/arquivos/{{ item.clip.file_path }}"{% if item.clip.thumbnail_path %} poster="/arquivos/{{ item.clip.thumbnail_path }}"{% endif %}></video>
+        <div class="small muted">{{ layout_labels.get(item.clip.layout, item.clip.layout) }} · {{ item.clip.style }} · {{ item.clip.encoder }} · {{ item.clip.duration_seconds|round(1) }} s{% if item.clip.render_seconds %} · renderizado em {{ item.clip.render_seconds|round|int }} s{% endif %} · {{ item.clip.updated_at|dt }}</div>
+        <div class="cand-actions">
+          <a class="btn small" href="/arquivos/{{ item.clip.file_path }}" download>⬇ Baixar .mp4</a>
+          {% if item.clip.package_path %}<a class="btn small" href="/arquivos/{{ item.clip.package_path }}" target="_blank">📝 Pacote (.txt)</a>{% endif %}
+        </div>
+      </div>
+      {% endif %}
+      <form class="render-form" hx-post="/candidatos/{{ c.id }}/corte" hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">
+        <div class="grid2">
+          <label>Layout
+            <select name="layout">
+              <option value="">padrão do streamer</option>
+              {% for k, label in layout_labels.items() %}<option value="{{ k }}" {{ 'selected' if c.render_layout == k }}>{{ label }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Legenda
+            <select name="style">
+              {% for k, st in styles.items() %}<option value="{{ k }}" {{ 'selected' if (c.render_style or 'classico') == k }}>{{ st.label }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+        <label>Título no topo <span class="small muted">(vazio = sem título)</span>
+          <input name="overlay_title" maxlength="80" value="{{ c.overlay_title if c.overlay_title is not none else (item.title_suggestion or '') }}">
+        </label>
+        <label>Legenda (corrija nomes e gírias; os tempos são reaproveitados)
+          <textarea name="subtitle_text" rows="3">{{ item.sub_text }}</textarea>
+        </label>
+        <p class="small muted">Facecam: defina o retângulo no cadastro do streamer (pixels num quadro 1920×1080). Sem retângulo, usa fundo borrado. O zoom acontece no pico ({{ (c.peak_t - c.eff_start)|round(1) }} s).</p>
+        <button class="btn small primary">🎬 {{ 'Renderizar de novo' if item.clip else 'Renderizar corte' }}</button>
+      </form>
+    </div>
+  </details>
+
   {% if item.drafts %}
   <details class="drafts" {{ 'open' if c.status == 'approved' }}>
     <summary>Pacote de postagem{% if e and e.status == 'ok' %} (IA){% else %} (rascunho simples){% endif %}</summary>

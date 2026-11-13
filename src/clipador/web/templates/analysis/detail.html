@@ -70,6 +70,15 @@
           </label>
         </form>
       </div>
+      <div class="render-actions">
+        <form method="post" action="/fontes/{{ source.id }}/renderizar-aprovados" class="inline"><input type="hidden" name="run" value="{{ run.id }}"><button class="btn primary" {{ 'disabled' if not approved_count }}>🎬 Renderizar aprovados ({{ approved_count }})</button></form>
+        <form method="post" action="/fontes/{{ source.id }}/video-longo" class="inline"><input type="hidden" name="run" value="{{ run.id }}"><button class="btn" {{ 'disabled' if not approved_count }}>🎞 Vídeo longo 16:9</button></form>
+        {% if long_art and long_art.files.get('video') %}
+          <a class="btn" href="/arquivos/{{ long_art.files.video }}" download>⬇ longo.mp4 ({{ long_art.summary.get('moments') }} momentos)</a>
+          <a class="btn" href="/arquivos/{{ long_art.files.chapters }}" target="_blank">📝 Capítulos</a>
+        {% endif %}
+        <span class="small muted">Os arquivos ficam em data/clips/{{ source.id }}/.</span>
+      </div>
       <div class="flash warn small copyright">🎵 Antes de postar, confira a música de fundo: a IA não detecta música com direitos autorais, e isso pode derrubar ou desmonetizar o vídeo.</div>
       {% if not candidates %}<div class="empty">Nenhum candidato. Tente baixar a altura mínima dos picos ou mudar o preset.</div>{% endif %}
       <div class="cand-list">
@@ -157,7 +166,7 @@
     if (ev.target.id !== "stages") return;
     const box = ev.target.querySelector(".stages");
     if (!box || box.dataset.active === "1" || PINNED) return;
-    if (window.ENRICH_STAMP === undefined) window.ENRICH_STAMP = {{ enrich_art.updated_at.timestamp()|round|int if enrich_art else 0 }};
+    if (window.ENRICH_STAMP === undefined) window.ENRICH_STAMP = {{ (stages|map(attribute='artifact')|select|map(attribute='updated_at')|max).timestamp()|round|int if stages|map(attribute='artifact')|select|list else 0 }};
     if (box.dataset.enrich && Number(box.dataset.enrich) !== window.ENRICH_STAMP) { location.reload(); return; }
     const latest = box.dataset.latestRun ? Number(box.dataset.latestRun) : null;
     if (latest && latest !== CURRENT_RUN) location.reload();

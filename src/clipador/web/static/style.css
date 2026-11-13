@@ -233,8 +233,22 @@ tr.inactive td { opacity: .55; }
 .regen { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .regen input[name=instruction] { flex: 1 1 220px; padding: .35rem .5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 
+/* step 4: render */
+.render-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: .75rem; }
+.render-box { margin-top: .6rem; border-top: 1px solid var(--border); padding-top: .5rem; }
+.render-box > summary { cursor: pointer; font-weight: 600; }
+.render-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: .75rem; margin-top: .5rem; }
+.render-grid:not(:has(.render-out)) { grid-template-columns: 1fr; }
+.rendered { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 8px; }
+.render-form label { display: block; color: var(--muted); font-size: .82rem; margin-bottom: .45rem; }
+.render-form input, .render-form select, .render-form textarea {
+  display: block; width: 100%; margin-top: .2rem; padding: .35rem .45rem; resize: vertical;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: .85rem;
+}
+
 @media (max-width: 900px) {
   .analysis-grid { grid-template-columns: 1fr; }
+  .render-grid { grid-template-columns: 1fr; }
   .tuning { position: static; }
   .cand-body { grid-template-columns: 1fr; }
 }
