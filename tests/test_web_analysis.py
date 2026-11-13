@@ -18,7 +18,7 @@ pytestmark = requires_ffmpeg
 
 
 @pytest.fixture
-def analyzed(asettings, fake_tx):  # noqa: F811
+def analyzed(asettings, fake_tx):
     app = create_app(asettings)
     engine = app.state.engine
     sid = _source(engine, asettings)

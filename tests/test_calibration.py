@@ -48,7 +48,7 @@ def test_recall_and_precision_known_case():
 
 
 @requires_ffmpeg
-def test_dump_and_eval_on_synthetic_analysis(asettings, engine, fake_tx, tmp_path):  # noqa: F811
+def test_dump_and_eval_on_synthetic_analysis(asettings, engine, fake_tx, tmp_path):
     sid = _source(engine, asettings)
     _analyze(engine, sid)
     _drain(Worker(asettings, engine))
@@ -75,7 +75,7 @@ def test_dump_and_eval_on_synthetic_analysis(asettings, engine, fake_tx, tmp_pat
 
 
 @requires_ffmpeg
-def test_cli_dump_and_eval(asettings, engine, fake_tx, tmp_path, monkeypatch, capsys):  # noqa: F811
+def test_cli_dump_and_eval(asettings, engine, fake_tx, tmp_path, monkeypatch, capsys):
     sid = _source(engine, asettings)
     _analyze(engine, sid)
     _drain(Worker(asettings, engine))

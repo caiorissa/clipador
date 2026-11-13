@@ -31,7 +31,7 @@ pytestmark = requires_ffmpeg
 
 
 @pytest.fixture
-def analyzed(asettings, engine, fake_tx):  # noqa: F811
+def analyzed(asettings, engine, fake_tx):
     """A source analyzed by the full chain while Ollama is 'offline' (enrich skipped)."""
     asettings.target_clips = 2  # K = 6
     sid = _source(engine, asettings)
@@ -182,7 +182,7 @@ def test_missing_model_is_skipped_with_pull_hint(analyzed, engine, monkeypatch):
     assert art.status == ArtifactStatus.SKIPPED and "ollama pull qwen2.5:7b" in art.message
 
 
-def test_reranking_without_llm_calls(analyzed, engine, monkeypatch, asettings):  # noqa: F811
+def test_reranking_without_llm_calls(analyzed, engine, monkeypatch, asettings):
     sid, w = analyzed
     llm = use_llm(monkeypatch, FakeLLM(lambda msgs, i: good_answer(nota=10 - i)))
     enrich(engine, w, sid)
