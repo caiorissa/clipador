@@ -60,7 +60,7 @@
     {% set layout = val('default_layout', 'blur') %}
     <label class="check"><input type="radio" name="default_layout" value="blur" {{ 'checked' if layout == 'blur' }}> Fundo borrado</label>
     <label class="check"><input type="radio" name="default_layout" value="facecam" {{ 'checked' if layout == 'facecam' }}> Facecam embaixo</label>
-    <p class="small muted">Retângulo da facecam no vídeo original, em pixels (opcional; dá para ajustar no dia 4).</p>
+    <p class="small muted">Retângulo da facecam em pixels de um quadro 1920×1080 (x e y do canto superior esquerdo, largura e altura). Opcional: sem ele, os cortes usam fundo borrado.</p>
     <div class="grid4">
       <label>x <input name="facecam_x" inputmode="numeric" value="{{ val('facecam_x') }}"></label>
       <label>y <input name="facecam_y" inputmode="numeric" value="{{ val('facecam_y') }}"></label>

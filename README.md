@@ -95,6 +95,26 @@ descarregado no fim do estágio (`keep_alive=0`); os dois valores aparecem no lo
 
 > ⚠️ A IA não detecta **música com direitos autorais** de fundo: confira antes de postar.
 
+## Cortes prontos (Passo 4)
+
+Na página da fonte, aprove os candidatos e use **Renderizar aprovados** (ou "Renderizar corte" em
+cada um). Cada corte sai em `data/clips/<fonte>/` como **MP4 1080×1920** pronto para Shorts,
+TikTok e Reels, mais um `.txt` com título, descrição, hashtags e crédito de cada plataforma.
+
+- **Layouts:** *fundo borrado* (o jogo no meio, o mesmo vídeo borrado atrás) ou *facecam embaixo*
+  (jogo em cima, câmera do streamer embaixo). Para a facecam, preencha o retângulo no cadastro do
+  streamer em pixels de um quadro **1920×1080** (o Clipador ajusta para a resolução real).
+- **Legenda palavra por palavra** (ASS) com 4 estilos; a palavra falada fica destacada. Antes de
+  renderizar, corrija nomes e gírias no campo "Legenda": os tempos do Whisper são reaproveitados.
+- **Título curto no topo** (sugerido pela IA ou pelo rascunho; editável ou vazio) e **zoom rápido no
+  pico** do momento.
+- Áudio normalizado em **−14 LUFS**; vídeo com **NVENC** na GPU (cai para libx264 se precisar).
+- **Vídeo longo 16:9:** junta os aprovados em ordem cronológica, com legenda, em `longo_*.mp4`, e
+  gera os **capítulos** para colar na descrição do YouTube.
+
+Padrões dos cortes (seguindo a prática comum): começam ~4 s antes do pico e duram de 30 a 60 s;
+ajuste no painel "Ajustes da detecção". Renderizar de novo com os mesmos ajustes não refaz nada.
+
 ## Requisitos (Windows 11)
 
 1. **Python**: o projeto está fixado em **3.12** (`.python-version`), por compatibilidade com
