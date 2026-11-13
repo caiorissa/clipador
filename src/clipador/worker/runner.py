@@ -119,6 +119,7 @@ class Worker:
         self.stopping = threading.Event()
         self.reporter = _Reporter(self)
         self._active: dict[int, threading.Thread] = {}
+        self._active_types: dict[int, str] = {}
         self._active_lock = threading.Lock()
 
     # --- main loop -----------------------------------------------------------------------------
@@ -174,13 +175,23 @@ class Worker:
         with self._active_lock:
             return list(self._active)
 
+    def _busy_types(self) -> tuple[str, ...]:
+        """One render at a time, even when renders don't take the GPU lock."""
+        from clipador.pipeline.stages.render import RENDER_JOB_TYPES
+
+        with self._active_lock:
+            types = set(self._active_types.values())
+        return RENDER_JOB_TYPES if types & set(RENDER_JOB_TYPES) else ()
+
     def tick(self) -> bool:
         """Claim and start at most one job. Returns True if a job was started."""
         if len(self.active_job_ids()) >= self.settings.worker_concurrency:
             return False
         gpu_free = self.gpu_lock.acquire(blocking=False)
         try:
-            job = queue.claim(self.engine, self.worker_id, allow_gpu=gpu_free)
+            job = queue.claim(
+                self.engine, self.worker_id, allow_gpu=gpu_free, exclude_types=self._busy_types()
+            )
         except Exception:
             if gpu_free:
                 self.gpu_lock.release()
@@ -195,6 +206,7 @@ class Worker:
         )
         with self._active_lock:
             self._active[job.id] = t
+            self._active_types[job.id] = job.type
         t.start()
         return True
 
@@ -206,6 +218,7 @@ class Worker:
                 self.gpu_lock.release()
             with self._active_lock:
                 self._active.pop(job_id, None)
+                self._active_types.pop(job_id, None)
 
     # --- running one job -----------------------------------------------------------------------
     def execute(self, job_id: int) -> None:

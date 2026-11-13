@@ -10,21 +10,24 @@ from sqlmodel import Session, col, select
 
 from clipador.config import Settings
 from clipador.detection.params import PRESET_LABELS, PRESETS, SIGNALS, DetectParams
-from clipador.errors import ValidationError
+from clipador.errors import ClipadorError, ValidationError
 from clipador.llm.drafts import DRAFT_LABELS, DRAFT_PLATFORMS, clean_hashtags, clean_text
 from clipador.llm.scoring import RankingParams
 from clipador.models import (
+    RENDERABLE_STATUSES,
     AnalysisRun,
     Candidate,
     CandidateFeedback,
     CandidateStatus,
     PostDraft,
-    RenderedClip,
+    RenderKind,
     Source,
+    Streamer,
     Verdict,
 )
-from clipador.render.styles import STYLES
-from clipador.render.subtitles import words_in_window
+from clipador.render.filters import LAYOUT_LABELS, normalize_layout, resolve_layout
+from clipador.render.styles import load_styles
+from clipador.render.subtitles import apply_overrides, words_in_window
 from clipador.services import analysis, rendering
 from clipador.services.enrichment import drafts_for, enrichments_for, score_parts, set_ranking
 from clipador.utils import utcnow
@@ -96,10 +99,10 @@ def source_detail(
         game=source.game or settings.default_game,
         draft_platforms=DRAFT_PLATFORMS,
         draft_labels=DRAFT_LABELS,
-        styles=STYLES,
-        layout_labels=rendering.LAYOUT_LABELS,
+        styles=load_styles(settings.caption_styles_path),
+        layout_labels=LAYOUT_LABELS,
         long_art=analysis.artifact(session, source_id, "compile_long"),
-        approved_count=sum(1 for c, _ in cands if c.status == CandidateStatus.APPROVED),
+        approved_count=sum(1 for c, _ in cands if c.status in RENDERABLE_STATUSES),
         stages=analysis.stage_overview(session, source_id),
         latest_run_id=runs[0].id if runs else None,
         params=params,
@@ -223,19 +226,23 @@ def _card_items(
     ids = [c.id for c, _ in cands]
     enr = enrichments_for(session, ids)
     drafts = drafts_for(session, ids)
-    clips = {
-        r.candidate_id: r
-        for r in session.exec(select(RenderedClip).where(col(RenderedClip.candidate_id).in_(ids)))
-    }
+    renders = rendering.latest_renders(session, ids)
     words = (
         rendering.transcript_words(session.get_bind(), settings, cands[0][0].source_id)
         if settings is not None and cands
         else []
     )
+    streamer = None
+    if cands:
+        src = session.get(Source, cands[0][0].source_id)
+        streamer = session.get(Streamer, src.streamer_id) if src else None
+    rect = streamer.facecam_rect if streamer else None
     items = []
     for c, fb in cands:
         d = drafts.get(c.id, {})
-        auto_words = words_in_window(words, c.eff_start, c.eff_end)
+        shown = apply_overrides(words_in_window(words, c.eff_start, c.eff_end), c.caption_overrides)
+        r = renders.get(c.id, {})
+        wanted = c.render_layout or (streamer.default_layout if streamer else "blur")
         items.append(
             {
                 "c": c,
@@ -243,11 +250,15 @@ def _card_items(
                 "e": enr.get(c.id),
                 "drafts": d,
                 "parts": score_parts(c, enr.get(c.id), p),
-                "clip": clips.get(c.id),
-                "sub_text": c.subtitle_text
-                if c.subtitle_text is not None
-                else " ".join(w[2] for w in auto_words),
+                "preview": r.get(RenderKind.PREVIEW),
+                "final": r.get(RenderKind.FINAL),
+                "progress": {k: rendering.job_progress(session, v) for k, v in r.items()},
+                "sub_text": " ".join(w.text for w in shown),
                 "title_suggestion": rendering.suggested_title(enr.get(c.id), d.get("youtube")),
+                "layout": normalize_layout(wanted),
+                "layout_warning": resolve_layout(wanted, rect)[1],
+                "options": c.render_options or {},
+                "streamer": streamer,
             }
         )
     return items
@@ -289,8 +300,8 @@ def _card(
         signal_labels=SIGNAL_LABELS,
         draft_platforms=DRAFT_PLATFORMS,
         draft_labels=DRAFT_LABELS,
-        styles=STYLES,
-        layout_labels=rendering.LAYOUT_LABELS,
+        styles=load_styles(settings.caption_styles_path),
+        layout_labels=LAYOUT_LABELS,
         card_error=error,
         card_notice=notice,
     )
@@ -474,41 +485,73 @@ async def save_draft(request: Request, draft_id: int, session: SessionDep):
 # --- step 4: rendering ---------------------------------------------------------------------------
 
 
-@router.post("/candidatos/{candidate_id}/corte")
-async def render_candidate(request: Request, candidate_id: int, session: SessionDep):
-    """Save the clip options (layout, style, title, corrected subtitles) and render it."""
-    c = _candidate(session, candidate_id)
-    form = await request.form()
-    layout = str(form.get("layout", ""))
-    c.render_layout = layout if layout in rendering.LAYOUT_LABELS else None
+def _save_render_options(c: Candidate, form, words_all, settings: Settings) -> str | None:
+    """Apply the form to the candidate. Returns a PT-BR error or None."""
+    c.render_layout = normalize_layout(str(form.get("layout"))) if form.get("layout") else None
     style = str(form.get("style", ""))
-    c.render_style = style if style in STYLES else None
+    c.render_style = style if style in load_styles(settings.caption_styles_path) else None
     if "overlay_title" in form:
         c.overlay_title = " ".join(str(form["overlay_title"]).split())[:80]
+    opts = dict(c.render_options or {})
+    opts["opening"] = form.get("opening") == "on"
+    opts["credit"] = form.get("credit") == "on"
+    opts["peak_zoom"] = form.get("peak_zoom") == "on"
+    for key, lo, hi in (("zoom", 1.0, 3.0), ("foco_x", 0.0, 1.0)):
+        raw = str(form.get(key, "")).replace(",", ".").strip()
+        if raw:
+            try:
+                opts[key] = min(hi, max(lo, float(raw)))
+            except ValueError:
+                return f"Valor inválido em {key}."
+    c.render_options = opts
     if "subtitle_text" in form:
-        text = " ".join(str(form["subtitle_text"]).split())
-        auto = " ".join(
-            w[2]
-            for w in words_in_window(
-                rendering.transcript_words(session.get_bind(), request.app.state.settings,
-                                           c.source_id), c.eff_start, c.eff_end)
-        )  # fmt: skip
-        c.subtitle_text = None if text == auto else text
+        window = words_in_window(words_all, c.eff_start, c.eff_end)
+        tokens = str(form["subtitle_text"]).split()
+        if window and len(tokens) != len(window):
+            return (
+                f"A legenda tem {len(window)} palavras e você escreveu {len(tokens)}. Por enquanto "
+                "corrija palavra por palavra (use '-' para esconder uma palavra); o editor "
+                "completo vem no Passo 5."
+            )
+        overrides = {
+            str(w.idx): ("" if t == "-" else t) for w, t in zip(window, tokens, strict=False)
+            if t != w.text
+        }  # fmt: skip
+        c.caption_overrides = overrides or None
     c.updated_at = utcnow()
-    session.add(c)
-    try:
-        job = analysis.enqueue_render(session, c.source_id, [c.id])
-        session.commit()
-    except ValidationError as e:
+    return None
+
+
+@router.post("/candidatos/{candidate_id}/corte")
+async def render_candidate(request: Request, candidate_id: int, session: SessionDep):
+    """Save the clip options and render a preview or the final clip."""
+    settings: Settings = request.app.state.settings
+    c = _candidate(session, candidate_id)
+    form = await request.form()
+    words_all = rendering.transcript_words(session.get_bind(), settings, c.source_id)
+    err = _save_render_options(c, form, words_all, settings)
+    if err:
         session.rollback()
-        return _card(request, session, c, e.message)
-    return _card(
-        request, session, c, notice=f"Renderizando (job #{job.id})… a página atualiza sozinha."
-    )
+        return _card(request, session, _candidate(session, candidate_id), err)
+    session.add(c)
+    kind = "preview" if form.get("kind") == "preview" else "final"
+    try:
+        job, _todo, reused = analysis.enqueue_render(session, settings, c.source_id, [c.id], kind)
+        session.commit()
+    except (ValidationError, ClipadorError) as e:
+        session.rollback()
+        return _card(request, session, _candidate(session, candidate_id), e.message)
+    label = "Prévia" if kind == "preview" else "Render final"
+    if job is None and reused:
+        notice = f"{label} com estes ajustes já existe: reaproveitada."
+    else:
+        notice = f"{label} na fila (job #{job.id})… a página atualiza sozinha."
+    return _card(request, session, c, notice=notice)
 
 
 @router.post("/fontes/{source_id}/renderizar-aprovados")
 async def render_approved(request: Request, source_id: int, session: SessionDep):
+    settings: Settings = request.app.state.settings
     _source(session, source_id)
     form = await request.form()
     run = _selected_run(session, source_id, int(form["run"]) if form.get("run") else None)
@@ -519,18 +562,22 @@ async def render_approved(request: Request, source_id: int, session: SessionDep)
         for c in session.exec(
             select(Candidate)
             .where(
-                Candidate.analysis_run_id == run.id, Candidate.status == CandidateStatus.APPROVED
+                Candidate.analysis_run_id == run.id,
+                col(Candidate.status).in_(RENDERABLE_STATUSES),
             )
             .order_by(Candidate.final_rank, Candidate.rank)
         )
     ]
     try:
-        job = analysis.enqueue_render(session, source_id, ids)
+        job, todo, reused = analysis.enqueue_render(session, settings, source_id, ids, "final")
         session.commit()
-    except ValidationError as e:
+    except (ValidationError, ClipadorError) as e:
         session.rollback()
         return redirect(f"/fontes/{source_id}", e.message)
-    return redirect(f"/fontes/{source_id}", f"Renderizando {len(ids)} corte(s) (job #{job.id}).")
+    msg = f"{len(todo)} render(s) final(is) na fila" + (f" (job #{job.id})" if job else "")
+    if reused:
+        msg += f"; {len(reused)} já estavam prontos"
+    return redirect(f"/fontes/{source_id}", msg + ".")
 
 
 @router.post("/fontes/{source_id}/video-longo")
@@ -542,7 +589,7 @@ async def build_long_video(request: Request, source_id: int, session: SessionDep
         return redirect(f"/fontes/{source_id}", "Analise a fonte primeiro.")
     approved = session.exec(
         select(Candidate).where(
-            Candidate.analysis_run_id == run.id, Candidate.status == CandidateStatus.APPROVED
+            Candidate.analysis_run_id == run.id, col(Candidate.status).in_(RENDERABLE_STATUSES)
         )
     ).first()
     if approved is None:

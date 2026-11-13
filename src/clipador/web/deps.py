@@ -62,7 +62,12 @@ templates.env.filters["duration"] = format_duration
 templates.env.filters["dt"] = _dt
 templates.env.filters["hms"] = format_hms
 templates.env.filters["platform_label"] = _platform_label
+from clipador.render.filters import LAYOUT_LABELS  # noqa: E402
+from clipador.render.styles import load_styles  # noqa: E402
+
 templates.env.globals.update(
+    LAYOUT_LABELS=LAYOUT_LABELS,
+    caption_styles=load_styles,
     SOURCE_STATUS_LABELS=SOURCE_STATUS_LABELS,
     JOB_STATUS_LABELS=JOB_STATUS_LABELS,
     JOB_TYPE_LABELS=JOB_TYPE_LABELS,

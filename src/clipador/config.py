@@ -85,9 +85,25 @@ class Settings(BaseSettings):
 
     # --- rendering ---
     render_encoder: str = "auto"  # auto (NVENC if it really works, else libx264) | nvenc | x264
-    render_fps: int = 30
-    render_style: str = "classico"
+    render_max_fps: int = 60  # output fps = source fps (VFR -> CFR), capped here
+    render_style: str = "destaque_amarelo"
     zoom_amount: float = 0.12  # punch-in on the peak (0 = off)
+    # False = renders wait for the single GPU lock like Whisper/Ollama (one GPU job at a time).
+    render_parallel_with_gpu_jobs: bool = False
+    caption_styles_path: Path | None = None  # default: <repo>/config/caption_styles.toml
+    fonts_dir: Path | None = None  # default: <repo>/assets/fonts (embedded OFL font)
+    # Safe zone (fractions of the 1920 px height): platform UI covers the bottom and the top.
+    safe_bottom: float = 0.20
+    safe_top: float = 0.10
+    caption_lift: float = 0.04  # captions sit this much above the bottom safe line
+    opening_text_seconds: float = 2.0
+    loudness_target: float = -14.0
+    loudness_true_peak: float = -1.5
+    audio_fade_seconds: float = 0.08
+    min_caption_event: float = 0.25
+    preview_width: int = 540
+    preview_height: int = 960
+    platform_max_seconds: float = 60.0  # warn (don't block) above this
 
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala

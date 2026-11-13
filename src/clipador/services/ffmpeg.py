@@ -111,12 +111,14 @@ def pick_encoder(ffmpeg: str = "ffmpeg") -> str:
     return X264
 
 
-def make_thumbnail(video: Path, out: Path, at_seconds: float, ffmpeg: str = "ffmpeg") -> Path:
+def make_thumbnail(
+    video: Path, out: Path, at_seconds: float, ffmpeg: str = "ffmpeg", width: int = 480
+) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
         "-ss", f"{max(0.0, at_seconds):.2f}", "-i", str(video),
-        "-frames:v", "1", "-vf", "scale=480:-2", str(out),
+        "-frames:v", "1", "-vf", f"scale={width}:-2", str(out),
     ]  # fmt: skip
     res = _run(cmd, timeout=60)
     if res.returncode != 0 or not out.is_file():

@@ -1,0 +1,75 @@
+# Estilos de legenda do Clipador (editável). Cada [seção] é um estilo.
+#
+# modo:  "classico"  -> o grupo de palavras inteiro na mesma cor
+#        "destaque"  -> a palavra falada no momento muda de cor (cor_destaque)
+#        "pop"       -> a palavra falada muda de cor e dá um "pulo" de escala
+# Cores em #RRGGBB. tamanho em pixels num vídeo 1080x1920.
+# fonte: nome da fonte; a fonte embutida é "Anton" (assets/fonts, licença OFL).
+
+[classico]
+nome = "Clássico (branco, contorno preto)"
+modo = "classico"
+fonte = "Anton"
+tamanho = 96
+cor = "#FFFFFF"
+contorno = 7
+cor_contorno = "#000000"
+caixa_alta = true
+palavras_por_grupo = 3
+caracteres_por_linha = 16
+
+[destaque_amarelo]
+nome = "Destaque amarelo (palavra falada em amarelo)"
+modo = "destaque"
+fonte = "Anton"
+tamanho = 96
+cor = "#FFFFFF"
+cor_destaque = "#FFE000"
+contorno = 7
+cor_contorno = "#000000"
+caixa_alta = true
+palavras_por_grupo = 3
+caracteres_por_linha = 16
+
+[pop]
+nome = "Pop (palavra falada pula)"
+modo = "pop"
+fonte = "Anton"
+tamanho = 100
+cor = "#FFFFFF"
+cor_destaque = "#3DF57A"
+contorno = 8
+cor_contorno = "#000000"
+escala_pop = 122
+caixa_alta = true
+palavras_por_grupo = 2
+caracteres_por_linha = 14
+
+[caixa]
+nome = "Caixa escura"
+modo = "destaque"
+fonte = "Anton"
+tamanho = 88
+cor = "#FFFFFF"
+cor_destaque = "#3DF57A"
+caixa = true
+cor_caixa = "#000000"
+transparencia_caixa = 96   # 0 = opaca, 255 = invisível
+contorno = 12
+caixa_alta = true
+palavras_por_grupo = 3
+caracteres_por_linha = 16
+
+[neon]
+nome = "Neon"
+modo = "pop"
+fonte = "Anton"
+tamanho = 96
+cor = "#FFFFFF"
+cor_destaque = "#00F0FF"
+contorno = 7
+cor_contorno = "#2A0055"
+escala_pop = 115
+caixa_alta = true
+palavras_por_grupo = 2
+caracteres_por_linha = 14

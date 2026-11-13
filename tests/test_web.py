@@ -79,16 +79,24 @@ def test_edit_add_remove_channel_and_deactivate(client):
     client.post(f"/streamers/{sid}/canais/{ch.id}/remover")
     r = client.post(
         f"/streamers/{sid}",
-        data={"display_name": "Fulano Novo", "default_layout": "facecam", "facecam_x": "10",
-              "facecam_y": "20", "facecam_w": "300", "facecam_h": "200"},
+        data={"display_name": "Fulano Novo", "default_layout": "facecam_embaixo", "fc_x": "0.75",
+              "fc_y": "0,6", "fc_w": "0.2", "fc_h": "0.3", "default_caption_style": "pop",
+              "show_credit": "on"},
     )  # fmt: skip
     assert r.status_code == 200
     client.post(f"/streamers/{sid}/ativo")
     with Session(client.engine) as s:
         st = s.get(Streamer, sid)
-        assert st.display_name == "Fulano Novo" and st.facecam_rect == (10, 20, 300, 200)
+        assert st.display_name == "Fulano Novo" and st.facecam_rect == (0.75, 0.6, 0.2, 0.3)
+        assert st.default_layout == "facecam_embaixo" and st.default_caption_style == "pop"
+        assert st.show_credit and not st.show_opening_text
         assert not st.permission_confirmed and not st.active
         assert len(st.channels) == 3
+    r = client.post(f"/streamers/{sid}", data={"display_name": "X", "fc_x": "0.9", "fc_y": "0.1",
+                                               "fc_w": "0.5", "fc_h": "0.2"})  # fmt: skip
+    assert r.status_code == 422 and "caber no quadro" in r.text
+    assert client.get(f"/streamers/{sid}/frame.jpg").status_code == 404  # no source yet
+    assert "Ainda não há nenhuma fonte baixada" in client.get(f"/streamers/{sid}/editar").text
 
 
 def test_add_source_blocked_without_permission(client):

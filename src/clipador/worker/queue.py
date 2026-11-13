@@ -44,6 +44,7 @@ def enqueue(
     source_id: int | None = None,
     payload: dict[str, Any] | None = None,
     dedupe: bool = True,
+    needs_gpu: bool | None = None,
 ) -> Job:
     """Add a job (or return the already queued/running one for the same type+source)."""
     stage = get_stage(job_type)
@@ -64,7 +65,7 @@ def enqueue(
         type=job_type,
         source_id=source_id,
         payload=payload or {},
-        needs_gpu=stage.needs_gpu,
+        needs_gpu=stage.needs_gpu if needs_gpu is None else needs_gpu,
         max_attempts=stage.max_attempts,
         log=_stamp("Job criado e na fila."),
     )
@@ -123,7 +124,12 @@ def retry(session: Session, job_id: int) -> Job:
 # --- consumer side (worker) ---------------------------------------------------------------------
 
 
-def claim(engine: Engine, worker_id: str, allow_gpu: bool = True) -> Job | None:
+def claim(
+    engine: Engine,
+    worker_id: str,
+    allow_gpu: bool = True,
+    exclude_types: tuple[str, ...] = (),
+) -> Job | None:
     """Atomically take the oldest runnable queued job. A single UPDATE…WHERE id=(SELECT…) AND
     status='queued' is atomic in SQLite, so two workers can never claim the same job."""
     now = utcnow()
@@ -135,6 +141,8 @@ def claim(engine: Engine, worker_id: str, allow_gpu: bool = True) -> Job | None:
     )
     if not allow_gpu:
         candidate = candidate.where(Job.needs_gpu == False)  # noqa: E712
+    if exclude_types:
+        candidate = candidate.where(col(Job.type).not_in(exclude_types))
     stmt = (
         update(Job)
         .where(Job.id == candidate.scalar_subquery(), Job.status == JobStatus.QUEUED)

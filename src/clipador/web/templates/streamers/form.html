@@ -56,19 +56,89 @@
   {% endif %}
 
   <fieldset>
-    <legend>Layout padrão dos clips</legend>
+    <legend>Padrões dos cortes</legend>
     {% set layout = val('default_layout', 'blur') %}
-    <label class="check"><input type="radio" name="default_layout" value="blur" {{ 'checked' if layout == 'blur' }}> Fundo borrado</label>
-    <label class="check"><input type="radio" name="default_layout" value="facecam" {{ 'checked' if layout == 'facecam' }}> Facecam embaixo</label>
-    <p class="small muted">Retângulo da facecam em pixels de um quadro 1920×1080 (x e y do canto superior esquerdo, largura e altura). Opcional: sem ele, os cortes usam fundo borrado.</p>
+    <div class="grid2">
+      <label>Layout padrão
+        <select name="default_layout">
+          {% for k, label in LAYOUT_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if layout == k or (layout == 'facecam' and k == 'facecam_embaixo') }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Estilo de legenda padrão
+        {% set cs = val('default_caption_style') %}
+        <select name="default_caption_style">
+          <option value="">padrão do app</option>
+          {% for k, s in caption_styles().items() %}<option value="{{ k }}" {{ 'selected' if cs == k }}>{{ s.label }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    {% set show_credit = (form.get('show_credit') == 'on') if form else (streamer.show_credit if streamer else True) %}
+    {% set show_opening = (form.get('show_opening_text') == 'on') if form else (streamer.show_opening_text if streamer else True) %}
+    <label class="check"><input type="checkbox" name="show_credit" {{ 'checked' if show_credit }}> Mostrar crédito "via @…" no vídeo</label>
+    <label class="check"><input type="checkbox" name="show_opening_text" {{ 'checked' if show_opening }}> Mostrar texto de abertura nos 2 primeiros segundos</label>
+
+    <h3 class="fc-title">Facecam</h3>
+    {% set box = (streamer.facecam_box if streamer and streamer.facecam_box else [None, None, None, None]) %}
+    {% if streamer %}
+    <p class="small muted">Arraste um retângulo sobre a câmera do streamer. As coordenadas são relativas (0 a 1), então valem para qualquer resolução.</p>
+    <div class="fc-tool" id="fc-tool" data-src="/streamers/{{ streamer.id }}/frame.jpg">
+      <div class="fc-stage"><img id="fc-img" alt="Quadro de uma fonte do streamer"><div id="fc-rect" class="fc-rect" hidden></div></div>
+      <div class="fc-side">
+        <div class="small muted">Prévia do recorte</div>
+        <div id="fc-preview" class="fc-preview"></div>
+        <button type="button" class="btn small" id="fc-clear">Limpar facecam</button>
+      </div>
+      <p id="fc-missing" class="small warn-text" hidden>Ainda não há nenhuma fonte baixada deste streamer. Adicione e baixe um VOD em Fontes; depois volte aqui para marcar a facecam sobre um quadro real.</p>
+    </div>
+    {% else %}
+    <p class="small muted">Depois de cadastrar e baixar um VOD deste streamer, você marca a facecam arrastando sobre um quadro do vídeo.</p>
+    {% endif %}
     <div class="grid4">
-      <label>x <input name="facecam_x" inputmode="numeric" value="{{ val('facecam_x') }}"></label>
-      <label>y <input name="facecam_y" inputmode="numeric" value="{{ val('facecam_y') }}"></label>
-      <label>largura <input name="facecam_w" inputmode="numeric" value="{{ val('facecam_w') }}"></label>
-      <label>altura <input name="facecam_h" inputmode="numeric" value="{{ val('facecam_h') }}"></label>
+      {% for f, label, v in [('fc_x', 'x', box[0]), ('fc_y', 'y', box[1]), ('fc_w', 'largura', box[2]), ('fc_h', 'altura', box[3])] %}
+      <label>{{ label }} (0–1) <input name="{{ f }}" id="{{ f }}" inputmode="decimal" value="{{ form.get(f, '') if form else ('' if v is none else v) }}"></label>
+      {% endfor %}
     </div>
   </fieldset>
 
+  <script>
+  (function () {
+    const tool = document.getElementById("fc-tool");
+    if (!tool) return;
+    const img = document.getElementById("fc-img"), rectEl = document.getElementById("fc-rect");
+    const prev = document.getElementById("fc-preview");
+    const ids = ["fc_x", "fc_y", "fc_w", "fc_h"], inputs = ids.map((i) => document.getElementById(i));
+    img.onerror = () => { tool.querySelector(".fc-stage").hidden = true; tool.querySelector(".fc-side").hidden = true; document.getElementById("fc-missing").hidden = false; };
+    img.onload = draw;
+    img.src = tool.dataset.src;
+    function vals() { return inputs.map((i) => parseFloat(i.value)); }
+    function draw() {
+      const [x, y, w, h] = vals();
+      if ([x, y, w, h].some((v) => isNaN(v)) || !img.naturalWidth) { rectEl.hidden = true; prev.style.backgroundImage = ""; return; }
+      Object.assign(rectEl.style, { left: x * 100 + "%", top: y * 100 + "%", width: w * 100 + "%", height: h * 100 + "%" });
+      rectEl.hidden = false;
+      // preview: show only the selected part, scaled to the preview box width
+      const pw = prev.clientWidth || 200;
+      prev.style.height = (pw * (h * img.naturalHeight) / (w * img.naturalWidth)) + "px";
+      prev.style.backgroundImage = "url(" + img.src + ")";
+      prev.style.backgroundSize = (100 / w) + "% " + (100 / h) + "%";
+      prev.style.backgroundPosition = (w < 1 ? (x / (1 - w)) * 100 : 0) + "% " + (h < 1 ? (y / (1 - h)) * 100 : 0) + "%";
+    }
+    inputs.forEach((i) => i.addEventListener("input", draw));
+    let start = null;
+    const stage = tool.querySelector(".fc-stage");
+    function pos(ev) { const r = img.getBoundingClientRect(); return [Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))]; }
+    stage.addEventListener("pointerdown", (ev) => { start = pos(ev); stage.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+    stage.addEventListener("pointermove", (ev) => {
+      if (!start) return;
+      const [cx, cy] = pos(ev);
+      const x = Math.min(start[0], cx), y = Math.min(start[1], cy), w = Math.abs(cx - start[0]), h = Math.abs(cy - start[1]);
+      [x, y, w, h].forEach((v, k) => { inputs[k].value = v.toFixed(4); });
+      draw();
+    });
+    stage.addEventListener("pointerup", () => { start = null; });
+    document.getElementById("fc-clear").addEventListener("click", () => { inputs.forEach((i) => { i.value = ""; }); draw(); });
+  })();
+  </script>
   <div class="form-actions"><button class="btn primary">{{ 'Salvar' if streamer else 'Cadastrar' }}</button></div>
 </form>
 

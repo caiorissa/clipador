@@ -6,17 +6,20 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from sqlmodel import Session, col, select
 
 from clipador.errors import ValidationError
-from clipador.models import Layout, Platform, Streamer, StreamerChannel
+from clipador.models import Layout, Platform, Source, SourceStatus, Streamer, StreamerChannel
+from clipador.render.styles import load_styles
+from clipador.services import ffmpeg
 from clipador.services.sources import add_channel, suggest_credit, touch
 from clipador.web.deps import get_session, redirect, render
 
 router = APIRouter()
 SessionDep = Annotated[Session, Depends(get_session)]
 
-FACECAM_FIELDS = ("facecam_x", "facecam_y", "facecam_w", "facecam_h")
+FACECAM_FIELDS = ("fc_x", "fc_y", "fc_w", "fc_h")  # normalized 0..1
 
 
 def _get_streamer(session: Session, streamer_id: int) -> Streamer:
@@ -50,21 +53,25 @@ def _apply_form(streamer: Streamer, form: dict[str, str]) -> None:
     if layout not in tuple(Layout):
         raise ValidationError("Layout inválido.")
 
-    rect_raw = [form.get(f, "").strip() for f in FACECAM_FIELDS]
-    rect: list[int | None] = [None] * 4
+    rect_raw = [form.get(f, "").strip().replace(",", ".") for f in FACECAM_FIELDS]
+    box: list[float] | None = None
     if any(rect_raw):
         if not all(rect_raw):
-            raise ValidationError(
-                "Preencha os 4 valores da facecam (x, y, largura, altura) ou nenhum."
-            )
+            raise ValidationError("Facecam: desenhe o retângulo (ou preencha os 4 valores).")
         try:
-            rect = [int(v) for v in rect_raw]
+            box = [round(float(v), 4) for v in rect_raw]
         except ValueError:
+            raise ValidationError("Facecam: valores entre 0 e 1.") from None
+        x, y, w, h = box
+        if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1):
+            raise ValidationError("Facecam: valores entre 0 e 1 (fração da largura/altura).")
+        if x + w > 1.0001 or y + h > 1.0001 or w < 0.03 or h < 0.03:
             raise ValidationError(
-                "Os valores da facecam devem ser números inteiros (pixels)."
-            ) from None
-        if rect[2] <= 0 or rect[3] <= 0 or rect[0] < 0 or rect[1] < 0:
-            raise ValidationError("Facecam: x/y não podem ser negativos e largura/altura > 0.")
+                "Facecam: o retângulo precisa caber no quadro e não ser minúsculo."
+            )
+    style = form.get("default_caption_style", "").strip()
+    if style and style not in load_styles():
+        raise ValidationError("Estilo de legenda inválido.")
 
     streamer.display_name = name
     streamer.permission_confirmed = confirmed
@@ -72,7 +79,10 @@ def _apply_form(streamer: Streamer, form: dict[str, str]) -> None:
     streamer.permission_note = form.get("permission_note", "").strip()
     streamer.credit_text = form.get("credit_text", "").strip()
     streamer.default_layout = layout
-    streamer.facecam_x, streamer.facecam_y, streamer.facecam_w, streamer.facecam_h = rect
+    streamer.facecam_box = box
+    streamer.default_caption_style = style or None
+    streamer.show_credit = form.get("show_credit") == "on"
+    streamer.show_opening_text = form.get("show_opening_text") == "on"
     touch(streamer)
 
 
@@ -193,3 +203,24 @@ def remove_channel(streamer_id: int, channel_id: int, session: SessionDep):
     session.delete(ch)
     session.commit()
     return redirect(f"/streamers/{streamer_id}/editar", f"Canal {ch.channel_handle} removido.")
+
+
+@router.get("/streamers/{streamer_id}/frame.jpg")
+def streamer_frame(request: Request, streamer_id: int, session: SessionDep):
+    """A frame from this streamer's latest downloaded source, for drawing the facecam box."""
+    settings = request.app.state.settings
+    _get_streamer(session, streamer_id)
+    src = session.exec(
+        select(Source)
+        .where(Source.streamer_id == streamer_id, Source.status == SourceStatus.READY)
+        .order_by(col(Source.id).desc())
+    ).first()
+    if src is None or not src.file_path or not settings.abs_path(src.file_path).is_file():
+        raise HTTPException(status_code=404, detail="sem fonte baixada")
+    out = settings.tmp_dir / f"streamer_{streamer_id}_src{src.id}.jpg"
+    if not out.is_file():
+        at = (src.duration_seconds or 60) * 0.3
+        ffmpeg.make_thumbnail(
+            settings.abs_path(src.file_path), out, at, settings.ffmpeg_path, width=960
+        )
+    return FileResponse(out, media_type="image/jpeg")

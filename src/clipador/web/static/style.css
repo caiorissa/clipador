@@ -233,12 +233,27 @@ tr.inactive td { opacity: .55; }
 .regen { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .regen input[name=instruction] { flex: 1 1 220px; padding: .35rem .5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 
+/* facecam tool */
+.fc-title { font-size: .95rem; margin: .75rem 0 .3rem; }
+.fc-tool { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: .75rem; margin-bottom: .6rem; }
+.fc-stage { position: relative; cursor: crosshair; user-select: none; touch-action: none; line-height: 0; }
+.fc-stage img { width: 100%; border-radius: 6px; display: block; }
+.fc-rect { position: absolute; border: 2px solid var(--ok); background: rgba(47, 191, 113, .18); pointer-events: none; }
+.fc-preview { width: 100%; min-height: 60px; border: 1px solid var(--border); border-radius: 6px; background-repeat: no-repeat; background-color: var(--bg); margin-bottom: .5rem; }
+#fc-missing { grid-column: 1 / -1; }
+@media (max-width: 640px) { .fc-tool { grid-template-columns: 1fr; } }
+
 /* step 4: render */
 .render-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: .75rem; }
 .render-box { margin-top: .6rem; border-top: 1px solid var(--border); padding-top: .5rem; }
 .render-box > summary { cursor: pointer; font-weight: 600; }
-.render-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: .75rem; margin-top: .5rem; }
+.render-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .75rem; margin-top: .5rem; }
 .render-grid:not(:has(.render-out)) { grid-template-columns: 1fr; }
+.render-outs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .5rem; align-content: start; }
+.render-outs:empty { display: none; }
+.checks-row { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-bottom: .4rem; }
+.rstatus-done { color: var(--ok); } .rstatus-running, .rstatus-queued { color: #8fb3ff; }
+.rstatus-failed { color: var(--fail); } .rstatus-canceled { color: var(--muted); }
 .rendered { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 8px; }
 .render-form label { display: block; color: var(--muted); font-size: .82rem; margin-bottom: .45rem; }
 .render-form input, .render-form select, .render-form textarea {

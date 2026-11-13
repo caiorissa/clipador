@@ -27,7 +27,8 @@ class SourceKind(StrEnum):
 
 class Layout(StrEnum):
     BLUR = "blur"
-    FACECAM = "facecam"
+    FACECAM = "facecam_embaixo"
+    FULL = "jogo_cheio"
 
 
 class SourceStatus(StrEnum):
@@ -55,12 +56,12 @@ class Streamer(SQLModel, table=True):
     permission_date: date | None = None
     permission_note: str = ""
     credit_text: str = ""
-    default_layout: str = Field(default=Layout.BLUR)
-    # Optional facecam rectangle in source-video pixels.
-    facecam_x: int | None = None
-    facecam_y: int | None = None
-    facecam_w: int | None = None
-    facecam_h: int | None = None
+    default_layout: str = Field(default=Layout.BLUR)  # blur | facecam_embaixo | jogo_cheio
+    default_caption_style: str | None = None  # key in config/caption_styles.toml
+    # Facecam rectangle NORMALIZED to the frame (x, y, w, h in 0..1): valid at any resolution.
+    facecam_box: list[float] | None = Field(default=None, sa_column=Column(JSON))
+    show_credit: bool = True  # "via @handle" on screen
+    show_opening_text: bool = True
     active: bool = True
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -71,11 +72,11 @@ class Streamer(SQLModel, table=True):
     )
 
     @property
-    def facecam_rect(self) -> tuple[int, int, int, int] | None:
-        vals = (self.facecam_x, self.facecam_y, self.facecam_w, self.facecam_h)
-        if any(v is None for v in vals):
+    def facecam_rect(self) -> tuple[float, float, float, float] | None:
+        b = self.facecam_box
+        if not b or len(b) != 4 or b[2] <= 0 or b[3] <= 0:
             return None
-        return vals  # type: ignore[return-value]
+        return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
 
 
 class StreamerChannel(SQLModel, table=True):
@@ -196,6 +197,10 @@ class CandidateStatus(StrEnum):
     SUGGESTED = "suggested"
     APPROVED = "approved"
     REJECTED = "rejected"
+    RENDERED = "rendered"  # final render done
+
+
+RENDERABLE_STATUSES = (CandidateStatus.APPROVED, CandidateStatus.RENDERED)
 
 
 class Candidate(SQLModel, table=True):
@@ -219,11 +224,13 @@ class Candidate(SQLModel, table=True):
     # Detection score combined with the LLM score (step 3); None until ranked.
     final_score: float | None = None
     final_rank: int | None = None
-    # Step 4 (render): user choices for the vertical clip.
-    subtitle_text: str | None = Field(default=None, sa_column=Column(Text))  # corrected words
-    overlay_title: str | None = None  # text on top of the clip (None = suggestion)
-    render_layout: str | None = None  # blur | facecam (None = streamer default)
-    render_style: str | None = None  # subtitle style key
+    # Step 4 (render): per-candidate choices (None = streamer default).
+    caption_overrides: dict[str, str] | None = Field(default=None, sa_column=Column(JSON))
+    overlay_title: str | None = None  # opening text (None = suggestion from the LLM/draft)
+    render_layout: str | None = None
+    render_style: str | None = None  # caption style key
+    # {"opening": bool, "credit": bool, "zoom": float, "foco_x": float, "peak_zoom": bool}
+    render_options: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -316,22 +323,39 @@ class PostDraft(SQLModel, table=True):
 # --- Rendering (step 4) -------------------------------------------------------------------------
 
 
-class RenderedClip(SQLModel, table=True):
-    """Latest rendered vertical clip of a candidate (re-rendering replaces it)."""
+class RenderKind(StrEnum):
+    PREVIEW = "preview"
+    FINAL = "final"
 
-    __tablename__ = "rendered_clip"
+
+class RenderStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class Render(SQLModel, table=True):
+    """One preview or final render of a candidate (cached by params_hash)."""
 
     id: int | None = Field(default=None, primary_key=True)
-    candidate_id: int = Field(foreign_key="candidate.id", unique=True)
+    candidate_id: int = Field(foreign_key="candidate.id", index=True)
     source_id: int = Field(foreign_key="source.id", index=True)
-    params_hash: str
-    layout: str
-    style: str
-    file_path: str  # relative to data_dir
-    package_path: str | None = None  # .txt with title/description/hashtags per platform
+    job_id: int | None = Field(default=None, foreign_key="job.id")
+    kind: str = Field(default=RenderKind.FINAL)
+    params_hash: str = Field(index=True)
+    params: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    path: str | None = None  # relative to data_dir
+    package_path: str | None = None
     thumbnail_path: str | None = None
-    duration_seconds: float
-    encoder: str
+    duration: float | None = None
+    size_bytes: int | None = None
+    status: str = Field(default=RenderStatus.QUEUED, index=True)
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    warning: str | None = None
+    encoder: str | None = None
     render_seconds: float | None = None
+    loudness_lufs: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

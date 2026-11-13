@@ -76,45 +76,74 @@
     </div>
   </div>
 
-  <details class="render-box" {{ 'open' if c.status == 'approved' or item.clip }}>
-    <summary>Corte vertical 9:16{% if item.clip %} · <span class="status status-done">pronto</span>{% endif %}</summary>
+  {% set pv = item.preview %}{% set fn = item.final %}{% set o = item.options %}{% set st = item.streamer %}
+  <details class="render-box" {{ 'open' if c.status in ('approved', 'rendered') or pv or fn }}>
+    <summary>Corte vertical 9:16
+      {% for r, label in [(pv, 'prévia'), (fn, 'final')] %}{% if r %}
+        · {{ label }}: <span class="status rstatus-{{ r.status }}">{{ {'queued': 'na fila', 'running': 'renderizando', 'done': 'pronto', 'failed': 'falhou', 'canceled': 'cancelado'}.get(r.status, r.status) }}</span>
+      {% endif %}{% endfor %}
+    </summary>
+    {% if item.layout_warning %}<div class="flash warn small">{{ item.layout_warning }}</div>{% endif %}
     <div class="render-grid">
-      {% if item.clip %}
-      <div class="render-out">
-        <video class="rendered" controls preload="none" playsinline src="/arquivos/{{ item.clip.file_path }}"{% if item.clip.thumbnail_path %} poster="/arquivos/{{ item.clip.thumbnail_path }}"{% endif %}></video>
-        <div class="small muted">{{ layout_labels.get(item.clip.layout, item.clip.layout) }} · {{ item.clip.style }} · {{ item.clip.encoder }} · {{ item.clip.duration_seconds|round(1) }} s{% if item.clip.render_seconds %} · renderizado em {{ item.clip.render_seconds|round|int }} s{% endif %} · {{ item.clip.updated_at|dt }}</div>
-        <div class="cand-actions">
-          <a class="btn small" href="/arquivos/{{ item.clip.file_path }}" download>⬇ Baixar .mp4</a>
-          {% if item.clip.package_path %}<a class="btn small" href="/arquivos/{{ item.clip.package_path }}" target="_blank">📝 Pacote (.txt)</a>{% endif %}
+      <div class="render-outs">
+      {% for r, label in [(pv, 'Prévia (540×960)'), (fn, 'Final (1080×1920)')] %}{% if r %}
+        <div class="render-out">
+          <div class="small"><strong>{{ label }}</strong></div>
+          {% if r.status == 'done' and r.path %}
+            <video class="rendered" controls preload="none" playsinline src="/arquivos/{{ r.path }}"{% if r.thumbnail_path %} poster="/arquivos/{{ r.thumbnail_path }}"{% endif %}></video>
+            <div class="small muted">{{ layout_labels.get(r.params.get('layout'), r.params.get('layout')) }} · {{ r.encoder }} · {{ r.duration|round(1) }} s · {{ ((r.size_bytes or 0) / 1e6)|round(1) }} MB{% if r.render_seconds %} · {{ r.render_seconds|round(1) }} s ({{ (r.duration / r.render_seconds)|round(1) }}x){% endif %}{% if r.loudness_lufs is not none %} · {{ r.loudness_lufs|round(1) }} LUFS{% endif %}</div>
+            {% if r.warning %}<div class="small warn-text">⚠ {{ r.warning }}</div>{% endif %}
+            <div class="cand-actions">
+              <a class="btn small" href="/arquivos/{{ r.path }}" download>⬇ Baixar</a>
+              {% if r.package_path %}<a class="btn small" href="/arquivos/{{ r.package_path }}" target="_blank">📝 Pacote (.txt)</a>{% endif %}
+            </div>
+          {% elif r.status in ('queued', 'running') %}
+            {% set prog = item.progress.get(r.kind) or 0 %}
+            <div class="progress"><div class="bar status-running" style="width: {{ prog }}%"></div></div>
+            <span class="small muted">{{ prog|round|int }}%{% if r.job_id %} · <a href="/jobs/{{ r.job_id }}">log</a>{% endif %}</span>
+          {% else %}
+            <div class="small error-text">{{ r.error or 'falhou' }}</div>
+          {% endif %}
         </div>
+      {% endif %}{% endfor %}
       </div>
-      {% endif %}
       <form class="render-form" hx-post="/candidatos/{{ c.id }}/corte" hx-target="#cand-{{ c.id }}" hx-swap="outerHTML">
         <div class="grid2">
           <label>Layout
-            <select name="layout">
-              <option value="">padrão do streamer</option>
+            <select name="layout" data-layout-select>
+              <option value="">padrão do streamer ({{ layout_labels.get(st.default_layout if st else 'blur', 'Fundo borrado') }})</option>
               {% for k, label in layout_labels.items() %}<option value="{{ k }}" {{ 'selected' if c.render_layout == k }}>{{ label }}</option>{% endfor %}
             </select>
           </label>
           <label>Legenda
             <select name="style">
-              {% for k, st in styles.items() %}<option value="{{ k }}" {{ 'selected' if (c.render_style or 'classico') == k }}>{{ st.label }}</option>{% endfor %}
+              <option value="">padrão{% if st and st.default_caption_style %} ({{ st.default_caption_style }}){% endif %}</option>
+              {% for k, s in styles.items() %}<option value="{{ k }}" {{ 'selected' if c.render_style == k }}>{{ s.label }}</option>{% endfor %}
             </select>
           </label>
         </div>
-        <label>Título no topo <span class="small muted">(vazio = sem título)</span>
+        <div class="grid2 jogo-cheio-opts">
+          <label>Zoom do recorte (1 a 3) <input name="zoom" inputmode="decimal" value="{{ o.get('zoom', 1.0) }}"></label>
+          <label>Foco horizontal (0 = esquerda, 1 = direita) <input name="foco_x" inputmode="decimal" value="{{ o.get('foco_x', 0.5) }}"></label>
+        </div>
+        <div class="checks-row">
+          <label class="check small"><input type="checkbox" name="opening" {{ 'checked' if o.get('opening', st.show_opening_text if st else true) }}> texto de abertura (2 s)</label>
+          <label class="check small"><input type="checkbox" name="credit" {{ 'checked' if o.get('credit', st.show_credit if st else true) }}> crédito "via @…"</label>
+          <label class="check small"><input type="checkbox" name="peak_zoom" {{ 'checked' if o.get('peak_zoom', true) }}> zoom no pico</label>
+        </div>
+        <label>Texto de abertura <span class="small muted">(vazio = sem texto)</span>
           <input name="overlay_title" maxlength="80" value="{{ c.overlay_title if c.overlay_title is not none else (item.title_suggestion or '') }}">
         </label>
-        <label>Legenda (corrija nomes e gírias; os tempos são reaproveitados)
+        <label>Legenda (corrija palavra por palavra; "-" esconde uma palavra; os tempos não mudam)
           <textarea name="subtitle_text" rows="3">{{ item.sub_text }}</textarea>
         </label>
-        <p class="small muted">Facecam: defina o retângulo no cadastro do streamer (pixels num quadro 1920×1080). Sem retângulo, usa fundo borrado. O zoom acontece no pico ({{ (c.peak_t - c.eff_start)|round(1) }} s).</p>
-        <button class="btn small primary">🎬 {{ 'Renderizar de novo' if item.clip else 'Renderizar corte' }}</button>
+        <div class="cand-actions">
+          <button class="btn small" name="kind" value="preview">👁 Prévia rápida</button>
+          <button class="btn small primary" name="kind" value="final">🎬 Renderizar final</button>
+        </div>
       </form>
     </div>
   </details>
-
   {% if item.drafts %}
   <details class="drafts" {{ 'open' if c.status == 'approved' }}>
     <summary>Pacote de postagem{% if e and e.status == 'ok' %} (IA){% else %} (rascunho simples){% endif %}</summary>

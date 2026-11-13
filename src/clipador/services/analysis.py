@@ -94,12 +94,33 @@ def enqueue_enrich(
     return queue.enqueue(session, "enrich", source_id, payload)
 
 
-def enqueue_render(session: Session, source_id: int, candidate_ids: list[int]) -> Job:
+def enqueue_render(
+    session: Session,
+    settings: Settings,
+    source_id: int,
+    candidate_ids: list[int],
+    kind: str = "final",
+) -> tuple[Job | None, list, list]:
+    """Create Render rows (reusing cached ones) and queue one job for the missing ones.
+    Returns (job or None if everything was cached, to_render, reused)."""
+    from clipador.services import rendering
+
     if not candidate_ids:
         raise ValidationError("Escolha (ou aprove) pelo menos um candidato para renderizar.")
-    return queue.enqueue(
-        session, "render", source_id, {"candidate_ids": candidate_ids}, dedupe=False
+    todo, reused = rendering.request_renders(
+        session, session.get_bind(), settings, candidate_ids, kind
     )
+    fresh = [r for r in todo if r.job_id is None]
+    job = None
+    if fresh:
+        job = queue.enqueue(
+            session, "render", source_id, {"render_ids": [r.id for r in fresh]}, dedupe=False,
+            needs_gpu=not settings.render_parallel_with_gpu_jobs,
+        )  # fmt: skip
+        for r in fresh:
+            r.job_id = job.id
+            session.add(r)
+    return job, todo, reused
 
 
 def enqueue_compile_long(session: Session, source_id: int, run_id: int | None) -> Job:
