@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     rank_penalty_low_standalone: float = 6.0
     rank_low_standalone_threshold: int = 4
 
+    # --- rendering ---
+    render_encoder: str = "auto"  # auto (NVENC if it really works, else libx264) | nvenc | x264
+    render_fps: int = 30
+    render_style: str = "classico"
+    zoom_amount: float = 0.12  # punch-in on the peak (0 = off)
+
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
     # Tolerance (s) when checking if a golden moment falls inside a candidate (clipador eval).

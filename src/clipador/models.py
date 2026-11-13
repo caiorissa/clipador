@@ -219,6 +219,11 @@ class Candidate(SQLModel, table=True):
     # Detection score combined with the LLM score (step 3); None until ranked.
     final_score: float | None = None
     final_rank: int | None = None
+    # Step 4 (render): user choices for the vertical clip.
+    subtitle_text: str | None = Field(default=None, sa_column=Column(Text))  # corrected words
+    overlay_title: str | None = None  # text on top of the clip (None = suggestion)
+    render_layout: str | None = None  # blur | facecam (None = streamer default)
+    render_style: str | None = None  # subtitle style key
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -304,5 +309,29 @@ class PostDraft(SQLModel, table=True):
     description: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
     hashtags: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     edited_by_user: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# --- Rendering (step 4) -------------------------------------------------------------------------
+
+
+class RenderedClip(SQLModel, table=True):
+    """Latest rendered vertical clip of a candidate (re-rendering replaces it)."""
+
+    __tablename__ = "rendered_clip"
+
+    id: int | None = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="candidate.id", unique=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    params_hash: str
+    layout: str
+    style: str
+    file_path: str  # relative to data_dir
+    package_path: str | None = None  # .txt with title/description/hashtags per platform
+    thumbnail_path: str | None = None
+    duration_seconds: float
+    encoder: str
+    render_seconds: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

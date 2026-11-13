@@ -33,6 +33,7 @@ STAGE_LABELS = {
     "detect": "Detectar",
     "enrich": "IA (Ollama)",
 }
+EXTRA_STAGES = {"render": "Cortes verticais", "compile_long": "Vídeo longo 16:9"}
 
 
 def start_analysis(
@@ -93,10 +94,22 @@ def enqueue_enrich(
     return queue.enqueue(session, "enrich", source_id, payload)
 
 
+def enqueue_render(session: Session, source_id: int, candidate_ids: list[int]) -> Job:
+    if not candidate_ids:
+        raise ValidationError("Escolha (ou aprove) pelo menos um candidato para renderizar.")
+    return queue.enqueue(
+        session, "render", source_id, {"candidate_ids": candidate_ids}, dedupe=False
+    )
+
+
+def enqueue_compile_long(session: Session, source_id: int, run_id: int | None) -> Job:
+    return queue.enqueue(session, "compile_long", source_id, {"run_id": run_id})
+
+
 def stage_overview(session: Session, source_id: int) -> list[dict[str, Any]]:
     """Per-stage status for the UI: latest job + artifact."""
     rows = []
-    for stage in ANALYSIS_CHAIN:
+    for stage in [*ANALYSIS_CHAIN, *EXTRA_STAGES]:
         job = session.exec(
             select(Job)
             .where(Job.source_id == source_id, Job.type == stage)
@@ -113,7 +126,7 @@ def stage_overview(session: Session, source_id: int) -> list[dict[str, Any]]:
         rows.append(
             {
                 "stage": stage,
-                "label": STAGE_LABELS[stage],
+                "label": STAGE_LABELS.get(stage) or EXTRA_STAGES[stage],
                 "job": job,
                 "artifact": art,
                 "elapsed": elapsed,

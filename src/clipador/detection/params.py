@@ -50,11 +50,11 @@ class CandidateParams(BaseModel):
     num_candidates: int = 20
     peak_min_height: float = 0.2  # on the 0..1 interest curve
     peak_min_distance_s: int = 20
-    context_before_s: float = 10.0  # setup before the peak
+    context_before_s: float = 4.0  # setup before the peak (guide: ~3 s before the peak)
     tail_after_s: float = 6.0  # after the curve decays
     decay_ratio: float = 0.45  # curve below peak*ratio = moment over
-    min_duration_s: float = 20.0
-    max_duration_s: float = 45.0
+    min_duration_s: float = 30.0  # Shorts/Reels/TikTok sweet spot: 30-60 s
+    max_duration_s: float = 60.0
     pause_min_s: float = 0.4  # gap between words that counts as a pause
     snap_window_s: float = 3.0  # how far an edge may move to find a pause
     min_gap_s: float = 3.0  # candidates closer than this are considered overlapping

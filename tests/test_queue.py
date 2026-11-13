@@ -240,9 +240,16 @@ def test_runner_records_failure(settings, engine):
     assert "ERRO: falhou feio" in j.log
 
 
+class _StubStage(Stage):
+    name = "stub"
+
+    def run(self, ctx: StageContext) -> None:
+        raise NotImplementedError("em breve")
+
+
 def test_runner_stub_stage_not_implemented(settings, engine):
-    job = _job(engine, "render")
-    w = Worker(settings, engine)
+    job = _job(engine, "stub")
+    w = Worker(settings, engine, stages={**STAGES, "stub": _StubStage})
     _drain(w)
     j = _get(engine, job.id)
     assert j.status == JobStatus.FAILED and "não implementado" in j.error

@@ -133,3 +133,53 @@ def tool_version(binary: str) -> str | None:
     if res.returncode != 0:
         return None
     return (res.stdout.splitlines() or [""])[0].strip()
+
+
+def run_with_progress(
+    args: list[str],
+    *,
+    duration: float,
+    progress_cb,
+    cwd: Path | None = None,
+    ffmpeg: str = "ffmpeg",
+    error_message: str = "O ffmpeg falhou.",
+) -> None:
+    """Run `ffmpeg <args>` reporting 0..1 progress (from -progress) to progress_cb, which may
+    raise to cancel (the process is killed). Raises ToolError with stderr in `detail`."""
+    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+           "-progress", "pipe:1", "-nostats", *args]  # fmt: skip
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            errors="replace", cwd=str(cwd) if cwd else None,
+        )  # fmt: skip
+    except FileNotFoundError as e:
+        raise ToolError("ffmpeg não encontrado (rode `clipador doctor`).", detail=str(e)) from e
+    err_lines: list[str] = []
+
+    def drain_stderr():
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            err_lines.append(line.rstrip())
+            del err_lines[:-40]
+
+    import threading
+
+    t = threading.Thread(target=drain_stderr, daemon=True)
+    t.start()
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            key, _, value = line.strip().partition("=")
+            if key == "out_time_us" and value.isdigit() and duration > 0:
+                progress_cb(min(0.99, int(value) / 1e6 / duration))
+        proc.wait()
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    t.join(timeout=5)
+    if proc.returncode != 0:
+        raise ToolError(
+            error_message, detail="\n".join(err_lines)[-3000:] or f"exit {proc.returncode}"
+        )

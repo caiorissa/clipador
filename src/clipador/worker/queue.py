@@ -43,16 +43,21 @@ def enqueue(
     job_type: str,
     source_id: int | None = None,
     payload: dict[str, Any] | None = None,
+    dedupe: bool = True,
 ) -> Job:
     """Add a job (or return the already queued/running one for the same type+source)."""
     stage = get_stage(job_type)
-    existing = session.exec(
-        select(Job).where(
-            Job.type == job_type,
-            Job.source_id == source_id,
-            col(Job.status).in_(ACTIVE_JOB_STATUSES),
-        )
-    ).first()
+    existing = (
+        None
+        if not dedupe
+        else session.exec(
+            select(Job).where(
+                Job.type == job_type,
+                Job.source_id == source_id,
+                col(Job.status).in_(ACTIVE_JOB_STATUSES),
+            )
+        ).first()
+    )
     if existing:
         return existing
     job = Job(
