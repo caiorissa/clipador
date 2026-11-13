@@ -9,6 +9,7 @@ from itertools import pairwise
 import pytest
 from sqlmodel import Session, select
 
+from clipador.detection.params import DetectParams
 from clipador.models import (
     AnalysisRun,
     Candidate,
@@ -154,7 +155,7 @@ def setup(rsettings, engine):
                      media_info={"width": 1280, "height": 720})  # fmt: skip
         s.add(src)
         s.flush()
-        run = AnalysisRun(source_id=src.id, params_hash="x", params={})
+        run = AnalysisRun(source_id=src.id, params_hash="x", params=DetectParams().model_dump())
         s.add(run)
         s.flush()
         c1 = Candidate(source_id=src.id, analysis_run_id=run.id, rank=1, start=0.5, end=5.5,
