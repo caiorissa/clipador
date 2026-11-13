@@ -396,6 +396,18 @@
   }
   document.getElementById("faithful-btn").addEventListener("click", requestFaithful);
 
+  // --- pre-publish checks ------------------------------------------------------------------------
+  const checksStatus = document.getElementById("checks-status"), readyBadge = document.getElementById("ready-badge");
+  document.querySelectorAll("[data-check]").forEach((box) => box.addEventListener("change", () => {
+    const body = new FormData(); body.append(box.dataset.check, box.checked ? "1" : "0");
+    checksStatus.textContent = "salvando…";
+    fetch("/revisao/" + cfg.candidate + "/verificacoes", { method: "POST", body }).then((r) => r.json()).then((d) => {
+      if (!d.ok) { checksStatus.textContent = "⚠ " + d.error; box.checked = !box.checked; return; }
+      checksStatus.textContent = "salvo";
+      if (readyBadge) readyBadge.hidden = !d.ready;
+    }).catch(() => { checksStatus.textContent = "⚠ não salvou (sem conexão?)"; box.checked = !box.checked; });
+  }));
+
   // --- decisions ------------------------------------------------------------------------------------
   function decide(action, reason) {
     form.action.value = action; form.reason_tag.value = reason || "";

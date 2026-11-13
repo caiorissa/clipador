@@ -77,6 +77,7 @@ def source_detail(
     settings: SettingsDep,
     run: int | None = None,
     sort: str = "final",
+    filtro: str = "",
 ):
     source = _source(session, source_id)
     runs = analysis.runs_for(session, source_id)
@@ -86,6 +87,9 @@ def source_detail(
     ranking = RankingParams.from_run(selected.params, settings) if selected else None
     items = _card_items(session, cands, ranking or RankingParams.from_settings(settings), settings)
     items = _sorted(items, sort)
+    ready_count = sum(1 for i in items if i["ready"])
+    if filtro == "prontos":
+        items = [i for i in items if i["ready"]]
     enrich_art = analysis.artifact(session, source_id, "enrich")
     return render(
         request,
@@ -98,6 +102,8 @@ def source_detail(
         items=items,
         sort=sort if sort in SORTS else "final",
         sorts=SORTS,
+        filtro="prontos" if filtro == "prontos" else "",
+        ready_count=ready_count,
         ranking=ranking,
         enrich_art=enrich_art,
         llm_model=(enrich_art.summary.get("model") if enrich_art and enrich_art.summary else None)

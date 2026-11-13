@@ -8,7 +8,7 @@
     <h1>Revisão</h1>
     <div class="small muted" data-progress>
       {% if progress.position %}<strong class="pos">{{ progress.position }} de {{ progress.total }}</strong> · {% endif %}
-      {{ progress.reviewed }} revisados · <span class="ok-text">✓ {{ progress.approved }}</span> · <span class="error-text">✗ {{ progress.rejected }}</span> · ⏭ {{ progress.skipped }} pulados · {{ progress.suggested }} sem decisão
+      {{ progress.reviewed }} revisados · <span class="ok-text">✓ {{ progress.approved }}</span> · <span class="error-text">✗ {{ progress.rejected }}</span> · ⏭ {{ progress.skipped }} pulados · {{ progress.suggested }} sem decisão · <a href="/revisao?{{ f.query(status='prontos') }}" class="ok-text" title="aprovados com as verificações marcadas">✔ {{ progress.ready }} prontos para publicar</a>
     </div>
   </div>
   <div class="head-actions">
@@ -106,6 +106,15 @@
     </div>
 
     <div class="card" id="caption-editor" data-shortcut="e"></div>
+
+    <div class="card checks-card" id="checks">
+      <h3>Antes de publicar <span class="badge ready" id="ready-badge" {{ 'hidden' if not ready }}>✔ pronto para publicar</span></h3>
+      <div class="flash warn small copyright">🎵 <strong>A IA não detecta música com direitos autorais.</strong> Ouça o fundo do clip antes de postar: música protegida pode derrubar, bloquear ou desmonetizar o vídeo.</div>
+      <label class="check"><input type="checkbox" data-check="musica_conferida" {{ 'checked' if checks.get('musica_conferida') }}> Conferi música/copyright de fundo</label>
+      {% if has_alerts %}<label class="check"><input type="checkbox" data-check="alertas_reconhecidos" {{ 'checked' if checks.get('alertas_reconhecidos') }}> Li os alertas da IA</label>{% endif %}
+      <p class="small muted">Não impede aprovar: só o selo “pronto para publicar” e o filtro “Prontos” dependem destas caixas. Mudanças entram no histórico (<kbd>Z</kbd> desfaz).</p>
+      <span class="small" id="checks-status"></span>
+    </div>
 
     <div class="card decide">
       <form method="post" action="/revisao/{{ c.id }}/decisao" id="decision-form">

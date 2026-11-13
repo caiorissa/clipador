@@ -64,6 +64,12 @@
         <h2>Candidatos ({{ candidates|length }})</h2>
         <form method="get" class="inline-form">
           {% if pinned_run %}<input type="hidden" name="run" value="{{ run.id }}">{% endif %}
+          <label class="small muted">Mostrar
+            <select name="filtro" onchange="this.form.submit()">
+              <option value="">todos</option>
+              <option value="prontos" {{ 'selected' if filtro == 'prontos' }}>prontos para publicar ({{ ready_count }})</option>
+            </select>
+          </label>
           <label class="small muted">Ordenar por
             <select name="sort" onchange="this.form.submit()">
               {% for key, label in sorts.items() %}<option value="{{ key }}" {{ 'selected' if key == sort }}>{{ label }}</option>{% endfor %}

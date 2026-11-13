@@ -81,6 +81,7 @@ ACTION_LABELS = {
     DecisionAction.UNDO: "desfez",
     DecisionAction.EDIT_RANGE: "ajustou o corte de",
     DecisionAction.REOPEN: "reabriu",
+    DecisionAction.EDIT_CHECKS: "mudou as verificações de",
 }
 UNDOABLE = {a for a in DecisionAction if a != DecisionAction.UNDO}
 EDIT_COALESCE_SECONDS = 90  # consecutive edits of the same clip become one undo step
@@ -112,6 +113,43 @@ def ready_to_publish(c: Candidate, has_alerts: bool) -> bool:
     )
 
 
+def alerted_ids(session: Session, candidate_ids: list[int]) -> set[int]:
+    """Candidates whose (successful) AI enrichment raised alerts."""
+    if not candidate_ids:
+        return set()
+    rows = session.exec(
+        select(CandidateEnrichment).where(col(CandidateEnrichment.candidate_id).in_(candidate_ids))
+    ).all()
+    return {e.candidate_id for e in rows if has_alerts(e)}
+
+
+def ready_ids(session: Session, cands: list[Candidate]) -> set[int]:
+    alerted = alerted_ids(session, [c.id for c in cands if c.status in RENDERABLE_STATUSES])
+    return {c.id for c in cands if ready_to_publish(c, c.id in alerted)}
+
+
+def set_checks(session: Session, candidate_id: int, **values: bool) -> Candidate:
+    """Tick/untick pre-publish checks (keys in CHECK_KEYS). Each real change is recorded as an
+    'edit_checks' decision with the previous state, so Z (undo) restores it like any other."""
+    unknown = set(values) - set(CHECK_KEYS)
+    if unknown:
+        raise ValidationError(f"Verificação desconhecida: {', '.join(sorted(unknown))}.")
+    c = _get_candidate(session, candidate_id)
+    current = {k: bool((c.checks or {}).get(k)) for k in CHECK_KEYS}
+    new = {**current, **{k: bool(v) for k, v in values.items()}}
+    if new == current:
+        return c
+    session.add(
+        Decision(candidate_id=c.id, action=DecisionAction.EDIT_CHECKS,
+                 prev_state=snapshot(session, c))
+    )  # fmt: skip
+    c.checks = new
+    c.updated_at = utcnow()
+    session.add(c)
+    session.flush()
+    return c
+
+
 # --- state snapshots ---------------------------------------------------------------------------
 
 
@@ -128,6 +166,7 @@ def snapshot(session: Session, c: Candidate) -> dict[str, Any]:
         "reviewed_at": c.reviewed_at.isoformat() if c.reviewed_at else None,
         "user_start": c.user_start,
         "user_end": c.user_end,
+        "checks": dict(c.checks) if c.checks else None,
         "feedback": (
             {"verdict": fb.verdict, "note": fb.note, "reason_tag": fb.reason_tag} if fb else None
         ),
@@ -139,6 +178,8 @@ def _restore(session: Session, c: Candidate, state: dict[str, Any]) -> None:
     ra = state.get("reviewed_at")
     c.reviewed_at = datetime.fromisoformat(ra) if ra else None
     c.user_start, c.user_end = state.get("user_start"), state.get("user_end")
+    if "checks" in state:  # snapshots made before 5B don't have it: leave the checks alone
+        c.checks = dict(state["checks"]) if state["checks"] else None
     c.updated_at = utcnow()
     session.add(c)
     fb = _feedback(session, c.id)
@@ -455,6 +496,7 @@ STATUS_FILTERS = {
     CandidateStatus.APPROVED: "Aprovados",
     CandidateStatus.REJECTED: "Rejeitados",
     CandidateStatus.RENDERED: "Renderizados",
+    "prontos": "Prontos para publicar (aprovado + verificações)",
 }
 
 
@@ -499,11 +541,14 @@ class ReviewFilters:
         p = {**self.params(), **{k: str(v) for k, v in extra.items() if v is not None}}
         return urlencode(p)
 
-    def matches_status(self, status: str) -> bool:
+    def matches_status(self, status: str, ready: bool = False) -> bool:
+        """`ready` (ready_to_publish) is only needed for the 'prontos' filter."""
         if self.status == "todos":
             return True
         if self.status == "pendentes":
             return status in PENDING_STATUSES
+        if self.status == "prontos":
+            return ready
         return status == self.status
 
 
@@ -565,13 +610,14 @@ def next_pending(
         if f.status == "pendentes"
         else [None]
     )
+    ready = ready_ids(session, items) if f.status == "prontos" else set()
     for tier in tiers:
         for c in rotated:
-            if (c.status in tier) if tier else f.matches_status(c.status):
+            if (c.status in tier) if tier else f.matches_status(c.status, c.id in ready):
                 return c
     if pos >= 0:
         last = items[pos]
-        if f.matches_status(last.status):
+        if f.matches_status(last.status, last.id in ready):
             return last
     return None
 
@@ -606,6 +652,7 @@ def progress(session: Session, f: ReviewFilters, current_id: int | None = None) 
         "skipped": by[CandidateStatus.SKIPPED],
         "approved": by[CandidateStatus.APPROVED] + by[CandidateStatus.RENDERED],
         "rejected": by[CandidateStatus.REJECTED],
+        "ready": len(ready_ids(session, items)),
         "reviewed": len(items) - by[CandidateStatus.SUGGESTED] - by[CandidateStatus.SKIPPED],
         "prev_id": ids[pos - 1] if pos else None,
         "next_id": ids[pos + 1] if pos is not None and pos + 1 < len(ids) else None,

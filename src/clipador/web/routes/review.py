@@ -133,8 +133,10 @@ def review_page(
     src, st = _streamer(session, cand)
     live = live_config(session, settings, cand, item)
     styles = load_styles(settings.caption_styles_path)
+    alerted = review.has_alerts(item["e"])
     return render(
         request, "review/index.html", cand=cand, item=item, source=src, streamer=st, live=live,
+        has_alerts=alerted, ready=review.ready_to_publish(cand, alerted), checks=cand.checks or {},
         progress=review.progress(session, f, cand.id), signals=SIGNALS,
         signal_labels=SIGNAL_LABELS, styles=styles, layout_labels=filters.LAYOUT_LABELS, **ctx,
     )  # fmt: skip
@@ -207,6 +209,23 @@ async def set_range(
             "adjusted": c.user_start is not None,
         }
     )
+
+
+@router.post("/revisao/{candidate_id}/verificacoes")
+async def set_checks(request: Request, candidate_id: int, session: SessionDep):
+    """JSON: tick/untick the pre-publish checks (only the keys sent change)."""
+    _candidate(session, candidate_id)
+    form = await request.form()
+    values = {k: str(form[k]) in ("1", "on", "true") for k in review.CHECK_KEYS if k in form}
+    try:
+        c = review.set_checks(session, candidate_id, **values)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return JSONResponse({"ok": False, "error": e.message}, status_code=422)
+    alerted = bool(review.alerted_ids(session, [c.id]))
+    return JSONResponse({"ok": True, "checks": c.checks or {},
+                         "ready": review.ready_to_publish(c, alerted)})  # fmt: skip
 
 
 @router.post("/revisao/{candidate_id}/layout")
