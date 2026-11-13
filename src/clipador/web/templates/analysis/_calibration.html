@@ -1,0 +1,43 @@
+{# Card "Pesos sugeridos pela calibração" (lazy-loaded into the detection tuning panel). #}
+{% macro pct(x) %}{{ '—' if x is none else ('%.0f%%'|format(100 * x)) }}{% endmacro %}
+{% macro auc(x) %}{{ '—' if x is none else ('%.3f'|format(x)) }}{% endmacro %}
+<div class="calib" id="calibration">
+  <h3>Pesos sugeridos pela calibração</h3>
+  <p class="small muted">A partir das suas decisões em <strong>todas as fontes</strong>: {{ cal.n }} revisados ({{ cal.n_pos }} aprovados, {{ cal.n_neg }} rejeitados; pulados não entram). Regressão logística simples; métricas com validação cruzada.</p>
+  {% for w in cal.warnings %}<div class="flash warn small">{{ w }}</div>{% endfor %}
+  {% if cal.n_pos and cal.n_neg %}
+  <table class="small">
+    <tr><th>sinal</th><th>atual</th><th>sugerido</th></tr>
+    {% for k in signals %}
+    <tr><td>{{ signal_labels[k] }}</td><td>{{ '%.2f'|format(cal.current_weights.get(k, 0)) }}</td>
+        <td>{{ '—' if cal.weights is none else '%.2f'|format(cal.weights.get(k, 0)) }}</td></tr>
+    {% endfor %}
+    {% if cal.ranking %}
+    <tr><td>detecção × IA</td><td>{{ '%.2f'|format(cal.current_ranking.w_detect) }} / {{ '%.2f'|format(cal.current_ranking.w_llm) }}</td>
+        <td>{{ '%.2f'|format(cal.ranking.w_detect) }} / {{ '%.2f'|format(cal.ranking.w_llm) }}</td></tr>
+    {% endif %}
+  </table>
+  <table class="small">
+    <tr><th>métrica (seus vereditos)</th><th>atual</th><th>sugerido</th></tr>
+    <tr><td>AUC detecção</td><td>{{ auc(cal.curve.auc_before) }}</td><td>{{ auc(cal.curve.auc_after) }}</td></tr>
+    {% for n, v in cal.curve.precision_before.items() %}
+    <tr><td>precisão@{{ n }}</td><td>{{ pct(v) }}</td><td>{{ pct(cal.curve.precision_after.get(n)) }}</td></tr>
+    {% endfor %}
+    {% if cal.blend %}
+    <tr><td>AUC nota final (detecção × IA, {{ cal.n_llm }})</td><td>{{ auc(cal.blend.auc_before) }}</td><td>{{ auc(cal.blend.auc_after) }}</td></tr>
+    {% endif %}
+  </table>
+  {% endif %}
+  <div class="cand-actions">
+    <form method="post" action="/fontes/{{ source_id }}/calibracao/aplicar" class="inline">
+      <button class="btn small primary" {{ 'disabled' if not cal.can_apply }} title="{{ 'cria um preset novo e reanalisa esta fonte (só a detecção)' if cal.can_apply else 'poucos dados: não aplique ainda' }}">Aplicar como novo preset</button>
+    </form>
+    {% if last_applied %}
+    <form method="post" action="/fontes/{{ source_id }}/calibracao/reverter" class="inline">
+      <button class="btn small" title="reanalisa com o preset de antes ({{ preset_labels.get(last_applied.previous_preset, last_applied.previous_preset) }})">↶ Reverter para o preset anterior</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="small muted">Nada é aplicado sozinho. Aplicar cria um preset salvo em <code>data/presets_calibrados.json</code> e roda a reanálise barata (sem retranscrever). Preset atual desta fonte: {{ preset_labels.get(current_preset, current_preset) or '—' }}.</p>
+  <details class="small"><summary>Relatório completo (o mesmo de <code>clipador calibrate --all</code>)</summary><pre>{{ text }}</pre></details>
+</div>

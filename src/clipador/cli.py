@@ -123,6 +123,25 @@ def cmd_eval(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_calibrate(settings: Settings, args) -> int:
+    import json
+
+    from clipador.errors import ClipadorError
+    from clipador.services.calibration import calibration_text, run_calibration
+
+    source_id = None if args.all else args.source
+    try:
+        cal = run_calibration(_engine(settings), settings, source_id)
+    except ClipadorError as e:
+        print(e.message, file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(cal.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        print(calibration_text(cal, source_id))
+    return 0
+
+
 def cmd_bench_transcribe(settings: Settings, args) -> int:
     """Measure Whisper speed (x real time) and peak VRAM on a WAV/video, without the queue."""
     import shutil
@@ -268,6 +287,11 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--run", type=int, help="id da análise (padrão: a mais recente)")
     ev.add_argument("--tolerance", type=float, help="folga em segundos (padrão 2)")
     ev.add_argument("--with-llm", action="store_true", help="compara com a reordenação da IA")
+    cal = sub.add_parser("calibrate", help="sugere pesos a partir das suas aprovações/rejeições")
+    scope = cal.add_mutually_exclusive_group()
+    scope.add_argument("--source", type=int, help="só os candidatos desta fonte")
+    scope.add_argument("--all", action="store_true", help="todas as fontes (padrão)")
+    cal.add_argument("--json", action="store_true", help="saída em JSON")
     rb = sub.add_parser("render-bench", help="mede a velocidade do render (prévia e final)")
     rb.add_argument("candidate_id", type=int, nargs="?", help="sem id: usa um vídeo de teste")
     rb.add_argument("--encoders", default="nvenc,x264")
@@ -295,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_dump(settings, args)
     if args.command == "eval":
         return cmd_eval(settings, args)
+    if args.command == "calibrate":
+        return cmd_calibrate(settings, args)
     if args.command == "doctor":
         return cmd_doctor(settings)
     if args.command == "web":

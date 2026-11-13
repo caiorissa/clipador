@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 SIGNALS = ("audio", "chat", "speech", "keywords")
+SIGNAL_LABELS = {"audio": "Áudio", "chat": "Chat", "speech": "Fala", "keywords": "Palavras"}
 
 PRESETS: dict[str, dict[str, float]] = {
     "equilibrado": {"audio": 1.0, "chat": 1.0, "speech": 0.6, "keywords": 0.8},
@@ -64,6 +65,9 @@ class CandidateParams(BaseModel):
 class DetectParams(BaseModel):
     features: FeatureParams = Field(default_factory=FeatureParams)
     candidates: CandidateParams = Field(default_factory=CandidateParams)
+    # Detection x AI weights for the run ({"w_detect", "w_llm", ...}); None = app settings.
+    # Set by calibrated presets (5B); RankingParams.from_run reads run.params["ranking"].
+    ranking: dict[str, float] | None = None
 
     @classmethod
     def from_preset(cls, preset: str) -> DetectParams:

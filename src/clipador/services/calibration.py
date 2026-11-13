@@ -1,4 +1,5 @@
-"""`clipador dump` / `clipador eval`: inspect candidates and measure detection quality."""
+"""`clipador dump` / `clipador eval`: inspect candidates and measure detection quality;
+`clipador calibrate`: suggest weights from the review decisions (core in detection.calibrate)."""
 
 from __future__ import annotations
 
@@ -6,13 +7,15 @@ import csv
 from pathlib import Path
 
 from sqlalchemy import Engine
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
 from clipador.config import Settings
+from clipador.detection.calibrate import Calibration, Sample, calibrate, format_text
 from clipador.detection.evaluate import EvalResult, RankedCandidate, evaluate, parse_golden
-from clipador.detection.params import SIGNALS
+from clipador.detection.params import SIGNAL_LABELS, SIGNALS
 from clipador.errors import ClipadorError
-from clipador.models import AnalysisRun, Source
+from clipador.llm.scoring import RankingParams
+from clipador.models import AnalysisRun, Candidate, CandidateStatus, Source
 from clipador.services import analysis
 from clipador.services.enrichment import enrichments_for
 from clipador.utils import format_hms
@@ -28,6 +31,60 @@ CSV_COLUMNS = [
     "feedback",
     "trecho",
 ]
+
+
+LABELS = {CandidateStatus.APPROVED: 1, CandidateStatus.RENDERED: 1, CandidateStatus.REJECTED: 0}
+
+
+def collect_samples(session: Session, settings: Settings, source_id: int | None = None):
+    """Reviewed candidates (approved/rendered = 1, rejected = 0; skipped and suggested are
+    ignored) with their breakdown, the weights they were found with and the AI nota."""
+    q = select(Candidate).where(col(Candidate.status).in_(list(LABELS)))
+    if source_id is not None:
+        q = q.where(Candidate.source_id == source_id)
+    cands = list(session.exec(q.order_by(Candidate.id)).all())
+    runs = {
+        r.id: r
+        for r in session.exec(
+            select(AnalysisRun).where(col(AnalysisRun.id).in_({c.analysis_run_id for c in cands}))
+        )
+    }
+    enr = enrichments_for(session, [c.id for c in cands])
+    out = []
+    for c in cands:
+        run = runs.get(c.analysis_run_id)
+        rp = run.params if run else {}
+        weights = rp.get("effective_weights") or rp.get("candidates", {}).get("weights") or {}
+        rank = (
+            RankingParams.from_run(rp, settings) if run else RankingParams.from_settings(settings)
+        )
+        e = enr.get(c.id)
+        out.append(
+            Sample(
+                breakdown={k: c.breakdown.get(k) for k in SIGNALS},
+                label=LABELS[c.status],
+                weights={k: float(v) for k, v in weights.items()},
+                llm=e.nota_geral if e else None,
+                w_detect=rank.w_detect,
+                w_llm=rank.w_llm,
+            )
+        )
+    return out
+
+
+def run_calibration(
+    engine: Engine, settings: Settings, source_id: int | None = None, seed: int = 0
+) -> Calibration:
+    with Session(engine) as s:
+        if source_id is not None and s.get(Source, source_id) is None:
+            raise ClipadorError(f"Fonte #{source_id} não existe.")
+        samples = collect_samples(s, settings, source_id)
+    return calibrate(samples, SIGNALS, seed=seed)
+
+
+def calibration_text(cal: Calibration, source_id: int | None) -> str:
+    scope = f"fonte #{source_id}" if source_id is not None else "todas as fontes"
+    return format_text(cal, SIGNAL_LABELS, scope)
 
 
 def _run(session: Session, source_id: int, run_id: int | None) -> AnalysisRun:

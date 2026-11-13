@@ -60,7 +60,22 @@ def reanalyze(session: Session, source_id: int, params: DetectParams) -> Job:
     ).first()
     if has_transcript is None:
         raise ValidationError("Analise a fonte primeiro (botão Analisar).")
-    return queue.enqueue(session, "detect", source_id, {"detect_params": params.model_dump()})
+    payload = {"detect_params": params.model_dump()}
+    active = session.exec(
+        select(Job).where(
+            Job.type == "detect",
+            Job.source_id == source_id,
+            col(Job.status).in_(ACTIVE_JOB_STATUSES),
+        )
+    ).first()
+    if active is not None and active.status == JobStatus.QUEUED:
+        # not started yet: the latest params win (e.g. apply then revert a calibrated preset)
+        active.payload = {**(active.payload or {}), **payload}
+        session.add(active)
+        session.flush()
+        return active
+    # a detect already running keeps its params; this one runs after it
+    return queue.enqueue(session, "detect", source_id, payload, dedupe=active is None)
 
 
 def artifact(session: Session, source_id: int, stage: str) -> StageArtifact | None:

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from sqlmodel import Session, col, select
 
 from clipador.config import Settings
-from clipador.detection.params import PRESET_LABELS, PRESETS, SIGNALS, DetectParams
+from clipador.detection.params import SIGNAL_LABELS, SIGNALS, DetectParams
 from clipador.errors import ClipadorError, ValidationError
 from clipador.llm.drafts import DRAFT_LABELS, DRAFT_PLATFORMS, clean_hashtags, clean_text
 from clipador.llm.scoring import RankingParams
@@ -29,7 +29,8 @@ from clipador.models import (
 from clipador.render.filters import LAYOUT_LABELS, normalize_layout, resolve_layout
 from clipador.render.styles import load_styles
 from clipador.render.subtitles import apply_glossary, words_in_window
-from clipador.services import analysis, captions, rendering, review
+from clipador.services import analysis, calibration, captions, rendering, review
+from clipador.services import presets as preset_store
 from clipador.services.enrichment import drafts_for, enrichments_for, score_parts, set_ranking
 from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
@@ -44,7 +45,6 @@ STATUS_TO_ACTION = {
     CandidateStatus.SKIPPED: DecisionAction.SKIP,
     CandidateStatus.SUGGESTED: DecisionAction.REOPEN,
 }
-SIGNAL_LABELS = {"audio": "Áudio", "chat": "Chat", "speech": "Fala", "keywords": "Palavras"}
 SORTS = {"final": "Nota final", "detect": "Detecção", "ia": "IA", "time": "Horário"}
 
 
@@ -91,6 +91,7 @@ def source_detail(
     if filtro == "prontos":
         items = [i for i in items if i["ready"]]
     enrich_art = analysis.artifact(session, source_id, "enrich")
+    preset_labels, preset_weights = preset_store.all_presets(settings)
     return render(
         request,
         "analysis/detail.html",
@@ -119,8 +120,8 @@ def source_detail(
         stages=analysis.stage_overview(session, source_id),
         latest_run_id=runs[0].id if runs else None,
         params=params,
-        presets=PRESET_LABELS,
-        preset_weights=PRESETS,
+        presets=preset_labels,
+        preset_weights=preset_weights,
         signals=SIGNALS,
         signal_labels=SIGNAL_LABELS,
     )
@@ -151,12 +152,12 @@ def start_analysis(source_id: int, session: SessionDep):
 
 
 @router.post("/fontes/{source_id}/reanalisar")
-async def reanalyze(request: Request, source_id: int, session: SessionDep):
+async def reanalyze(request: Request, source_id: int, session: SessionDep, settings: SettingsDep):
     form = await request.form()
     _source(session, source_id)
     try:
         preset = str(form.get("preset", "equilibrado"))
-        params = DetectParams.from_preset(preset)
+        params = preset_store.params_for_preset(settings, preset)  # built-in or calibrated
         c = params.candidates
 
         def num(name: str, default: float, lo: float, hi: float) -> float:
@@ -185,6 +186,55 @@ async def reanalyze(request: Request, source_id: int, session: SessionDep):
         return redirect(f"/fontes/{source_id}", e.message)
     return redirect(
         f"/fontes/{source_id}", f"Reanalisando (job #{job.id})… a lista atualiza sozinha."
+    )
+
+
+@router.get("/fontes/{source_id}/calibracao")
+def calibration_card(request: Request, source_id: int, session: SessionDep, settings: SettingsDep):
+    """Partial: weights suggested from ALL review decisions (more data than one source)."""
+    _source(session, source_id)
+    cal = calibration.run_calibration(session.get_bind(), settings)
+    runs = analysis.runs_for(session, source_id)
+    current = runs[0].params.get("candidates", {}) if runs else {}
+    labels, _weights = preset_store.all_presets(settings)
+    return render(
+        request, "analysis/_calibration.html", source_id=source_id, cal=cal,
+        signal_labels=SIGNAL_LABELS, signals=SIGNALS, preset_labels=labels,
+        current_preset=current.get("preset"), last_applied=preset_store.last_applied(
+            settings, source_id), text=calibration.calibration_text(cal, None),
+    )  # fmt: skip
+
+
+@router.post("/fontes/{source_id}/calibracao/aplicar")
+def apply_calibration(source_id: int, session: SessionDep, settings: SettingsDep):
+    _source(session, source_id)
+    cal = calibration.run_calibration(session.get_bind(), settings)  # recomputed: deterministic
+    try:
+        key, job = preset_store.apply_calibration(session, settings, source_id, cal)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return redirect(f"/fontes/{source_id}", e.message)
+    label = preset_store.all_presets(settings)[0].get(key, key)
+    return redirect(
+        f"/fontes/{source_id}", f"Preset “{label}” criado; reanalisando (job #{job.id})…"
+    )
+
+
+@router.post("/fontes/{source_id}/calibracao/reverter")
+def revert_calibration(source_id: int, session: SessionDep, settings: SettingsDep):
+    _source(session, source_id)
+    try:
+        entry, job = preset_store.revert(session, settings, source_id)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return redirect(f"/fontes/{source_id}", e.message)
+    labels = preset_store.all_presets(settings)[0]
+    prev = entry.get("previous_preset")
+    return redirect(
+        f"/fontes/{source_id}",
+        f"Voltando ao preset anterior ({labels.get(prev, prev)}); reanalisando (job #{job.id})…",
     )
 
 

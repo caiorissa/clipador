@@ -83,9 +83,13 @@ class DetectInputs:
                 "features": self.params.features.model_dump(),
             }
         )
-        self.run_hash = params_hash(
-            {"features": self.features_hash, "candidates": self.params.candidates.model_dump()}
-        )
+        run_key = {
+            "features": self.features_hash,
+            "candidates": self.params.candidates.model_dump(),
+        }
+        if self.params.ranking:  # only when set, so older run hashes stay the same
+            run_key["ranking"] = self.params.ranking
+        self.run_hash = params_hash(run_key)
 
 
 def latest_run(ctx: StageContext, source_id: int) -> AnalysisRun | None:
