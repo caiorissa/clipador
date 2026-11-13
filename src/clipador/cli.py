@@ -118,6 +118,70 @@ def cmd_eval(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_bench_transcribe(settings: Settings, args) -> int:
+    """Measure Whisper speed (x real time) and peak VRAM on a WAV/video, without the queue."""
+    import shutil
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from pathlib import Path
+
+    from clipador.services import audio
+    from clipador.services.transcriber import FasterWhisperTranscriber
+
+    src = Path(args.audio)
+    if not src.is_file():
+        print(f"Arquivo não encontrado: {src}", file=sys.stderr)
+        return 1
+    overrides = {"language": args.language}
+    if args.model:
+        overrides["whisper_model"] = args.model
+    if args.compute:
+        overrides["whisper_compute_type"] = args.compute
+    settings = settings.model_copy(update=overrides)
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "bench.wav"
+        audio.extract_wav(src, wav, start=0, end=args.seconds, duration_hint=None,
+                          progress_cb=lambda p: None, ffmpeg=settings.ffmpeg_path)  # fmt: skip
+        dur = audio.WavReader(wav).duration
+        peak = {"mb": 0}
+        stop = threading.Event()
+
+        def poll_vram():
+            while not stop.is_set() and shutil.which("nvidia-smi"):
+                try:
+                    out = subprocess.run(
+                        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                        capture_output=True, text=True, timeout=5,
+                    ).stdout  # fmt: skip
+                    peak["mb"] = max(peak["mb"], int(out.split()[0]))
+                except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+                    pass
+                stop.wait(0.5)
+
+        threading.Thread(target=poll_vram, daemon=True).start()
+        tr = FasterWhisperTranscriber(settings, print)
+        lang = None if settings.language == "auto" else settings.language
+        t0 = time.monotonic()
+        tr._load()
+        t_load = time.monotonic() - t0
+        t1 = time.monotonic()
+        words = tr.transcribe(wav, lang, lambda f: None)
+        t_tx = max(time.monotonic() - t1, 1e-3)
+        stop.set()
+        tr.close()
+    print(
+        f"\nmodelo={settings.whisper_model} compute={tr.compute_type} device={tr.device} "
+        f"idioma={tr.detected_language}\n"
+        f"áudio: {dur / 60:.1f} min · carga do modelo: {t_load:.1f}s · transcrição: {t_tx:.1f}s · "
+        f"{len(words)} palavras\n"
+        f"velocidade: {dur / t_tx:.1f}x tempo real · ~{3600 / (dur / t_tx) / 60:.1f} min por hora "
+        f"de VOD · pico de VRAM (GPU inteira): {peak['mb']} MiB"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_stdout()
     parser = argparse.ArgumentParser(prog="clipador", description="Clipador: VODs -> clips 9:16")
@@ -138,9 +202,17 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--golden", required=True, help="arquivo com um HH:MM:SS por linha")
     ev.add_argument("--run", type=int, help="id da análise (padrão: a mais recente)")
     ev.add_argument("--tolerance", type=float, help="folga em segundos (padrão 2)")
+    b = sub.add_parser("bench-transcribe", help="mede a velocidade do Whisper neste PC")
+    b.add_argument("audio", help="vídeo ou áudio (ex.: data/vods/1/video.mp4)")
+    b.add_argument("--seconds", type=float, default=600, help="quanto do início usar (padrão 600)")
+    b.add_argument("--model")
+    b.add_argument("--compute")
+    b.add_argument("--language", default="auto")
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.command == "bench-transcribe":
+        return cmd_bench_transcribe(settings, args)
     if args.command == "dump":
         return cmd_dump(settings, args)
     if args.command == "eval":

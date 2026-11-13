@@ -9,8 +9,55 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
 
 ## Status
 
-Passo 1 (fundação): cadastro de streamers e canais, ingest de VODs/clips das três plataformas,
-fila de jobs com worker separado, diagnóstico do ambiente (`doctor`).
+- Passo 1 (fundação): cadastro de streamers e canais, ingest de VODs/clips das três plataformas,
+  fila de jobs com worker separado, diagnóstico do ambiente (`doctor`).
+- Passo 2 (detecção): análise em 4 etapas (extrair áudio → transcrever na GPU → chat → detectar),
+  página da fonte com linha do tempo, player dos candidatos, feedback e reanálise instantânea,
+  e calibração com `clipador dump` / `clipador eval`.
+
+## Detecção de momentos (Passo 2)
+
+Na página da fonte (`/fontes/<id>`), **Analisar** roda a cadeia completa. Cada etapa fica salva em
+`data/work/<id>/` e só é refeita se os parâmetros dela mudarem; **Reanalisar** (painel "Ajustes
+da detecção") roda só a detecção e leva segundos.
+
+| Etapa | O que faz | Arquivo |
+|---|---|---|
+| Extrair áudio | WAV 16 kHz mono do trecho escolhido | `audio.wav` |
+| Transcrever | faster-whisper na GPU, em blocos de 10 min (retoma do último bloco se cair) | `transcript.json.gz` |
+| Chat | Twitch via TwitchDownloaderCLI, YouTube via replay de chat do yt-dlp; Kick indisponível | `chat.jsonl.gz` |
+| Detectar | features por segundo + curva de interesse + picos → candidatos | `features.npz` + banco |
+
+Sem chat a etapa fica como "pulado" e a nota usa só áudio e fala (os pesos se renormalizam).
+Para o chat da Twitch, baixe o **TwitchDownloaderCLI** em
+<https://github.com/lay295/TwitchDownloader/releases> e aponte `CLIPADOR_TWITCH_DOWNLOADER_PATH`.
+
+**Palavras de empolgação:** edite `data/hype_words.toml` (criado na primeira análise). Mudar o
+arquivo faz a próxima reanálise recalcular as features (rápido; não retranscreve).
+
+**Modelo do Whisper** (`.env`), medido numa RTX 5060 8 GB com 10 min de fala:
+
+| `CLIPADOR_WHISPER_MODEL` | `CLIPADOR_WHISPER_COMPUTE_TYPE` | velocidade | por hora de VOD | pico de VRAM* |
+|---|---|---|---|---|
+| `medium` (padrão) | `float16` | 21x | ~2,8 min | 3,2 GB |
+| `large-v3-turbo` | `int8_float16` | 39x | ~1,5 min | 2,1 GB |
+| `large-v3` | `float16` | 16x | ~3,8 min | 5,0 GB |
+
+\* GPU inteira, incluindo ~1 GB já usado pelo Windows. Se a VRAM apertar (jogo/OBS abertos), use
+`int8_float16`. Idioma: `CLIPADOR_LANGUAGE=pt` (padrão) ou `auto`. Meça no seu PC com:
+
+```powershell
+uv run clipador bench-transcribe data\vods\1\video.mp4 --seconds 600
+```
+
+**Calibração:** marque à mão os momentos bons num `golden.txt` (um `HH:MM:SS` por linha) e rode:
+
+```powershell
+uv run clipador dump 1 --top 20          # top 20 no terminal + candidates.csv
+uv run clipador eval 1 --golden golden.txt   # recall@5/10/20, precisão@N e momentos perdidos
+```
+
+Os botões Bom/Ruim da página entram na precisão@N.
 
 ## Requisitos (Windows 11)
 
