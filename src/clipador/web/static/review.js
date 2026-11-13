@@ -177,7 +177,8 @@
   // --- player limited to [start, end] ------------------------------------------------------------
   const playBtn = document.getElementById("play-btn"), readout = document.getElementById("time-readout");
   function frame() {
-    if (video.currentTime >= st.end) { video.pause(); video.currentTime = st.end; }
+    // stop at the end (only while playing: re-seeking a paused video would loop via 'seeked')
+    if (!video.paused && video.currentTime >= st.end) { video.pause(); video.currentTime = st.end; }
     draw(); updateOverlays();
     readout.textContent = fmt(video.currentTime - st.start) + " / " + fmt(st.end - st.start);
     drawTimeline();

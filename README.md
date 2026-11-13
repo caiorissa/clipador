@@ -14,6 +14,8 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
 - Passo 2 (detecção): análise em 4 etapas (extrair áudio → transcrever na GPU → chat → detectar),
   página da fonte com linha do tempo, player dos candidatos, feedback e reanálise instantânea,
   e calibração com `clipador dump` / `clipador eval`.
+- Passo 5A (revisão): tela `/revisao` com fila global, atalhos de teclado, prévia ao vivo,
+  ajuste do corte na forma de onda e histórico com desfazer.
 
 ## Detecção de momentos (Passo 2)
 
@@ -141,6 +143,54 @@ Meça no seu PC (com um candidato real ou um vídeo de teste):
 uv run clipador render-bench            # vídeo de teste 1080p60 de 40 s
 uv run clipador render-bench 12         # candidato #12
 ```
+
+## Revisão (Passo 5A)
+
+A tela **`/revisao`** (menu "Revisão") mostra **um candidato por vez**, de todas as fontes (só a
+análise mais recente de cada fonte), para decidir quase só com o teclado:
+
+- **Fila com filtros:** fonte, streamer, plataforma, nota final mínima e status (padrão:
+  pendentes; os **pulados** voltam no fim da fila), ordenada por posição, nota ou horário.
+  Mostra o progresso ("12 de 30"), **← Anterior**, **Desfazer** e o **histórico** das decisões.
+- **Resumo:** nota final, de detecção e da IA, barras do detalhamento, motivo da IA, alertas
+  (com o trecho) e o título sugerido.
+- **Prévia ao vivo (aproximada):** um palco 9:16 desenhado no navegador com o vídeo original no
+  layout escolhido (borrado, facecam embaixo, jogo cheio; usa a facecam, o zoom e o foco do
+  corte) e as legendas sincronizadas, no estilo de `config/caption_styles.toml`. Mudar início/fim
+  ou o layout atualiza na hora, sem render. O que é exportado é a **prévia fiel** (render real,
+  tecla `P`): ela aparece ao lado quando fica pronta.
+- **Ajuste do corte:** linha do tempo com a forma de onda do áudio (±60 s), as palavras
+  transcritas e duas alças arrastáveis que **encaixam nas bordas das palavras** e nas pausas
+  (desligue em "encaixar nas palavras" ou segure `Alt` ao arrastar). Há também campos numéricos
+  e botões **+5 s de contexto**. Sobrepor outro corte já aprovado da mesma fonte só gera aviso.
+  Os limites vêm de `CLIPADOR_CLIP_MIN_SECONDS` / `CLIPADOR_CLIP_MAX_SECONDS` (3 s / 180 s).
+- **Decisões:** aprovar grava o feedback "bom"; rejeitar pede o motivo (sem graça, sem contexto,
+  áudio ruim, risco de música com direitos, repetido, conteúdo sensível, outro) e grava "ruim";
+  pular não grava veredito. Tudo vai para um histórico persistido: **desfazer** (`Z`) volta a
+  última decisão de qualquer candidato, quantas vezes quiser. Os botões Aprovar/Rejeitar da
+  página da fonte passam pelo mesmo caminho.
+- **Render automático:** aprovar já enfileira o render final com os padrões do streamer
+  (`CLIPADOR_RENDER_ON_APPROVE=true`), sem duplicar se já existe um igual. Ao abrir um candidato,
+  a prévia fiel dos **próximos 3** pendentes entra na fila com prioridade baixa
+  (`CLIPADOR_REVIEW_PREFETCH`); renders pedidos à mão passam na frente.
+
+| tecla | ação |
+|---|---|
+| `A` | aprovar |
+| `R` e depois `1`…`7` | rejeitar com motivo (`Esc` cancela) |
+| `S` | pular |
+| `Z` | desfazer (repita para voltar mais) |
+| `Backspace` | voltar ao candidato anterior |
+| `Espaço` | play / pause |
+| `←` / `→` | −/+ 2 s no player |
+| `[` / `]` | início −/+ 0,5 s (`Shift` = 2 s) |
+| `,` / `.` | fim −/+ 0,5 s (`Shift` = 2 s) |
+| `L` | alternar o layout |
+| `P` | gerar a prévia fiel |
+| `?` | ajuda dos atalhos |
+
+Os atalhos não disparam enquanto você digita num campo (a nota, por exemplo); `Esc` sai do campo.
+
 ## Requisitos (Windows 11)
 
 1. **Python**: o projeto está fixado em **3.12** (`.python-version`), por compatibilidade com
