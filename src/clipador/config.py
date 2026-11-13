@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     preview_height: int = 960
     platform_max_seconds: float = 60.0  # warn (don't block) above this
 
+    # --- review (/revisao) ---
+    render_on_approve: bool = True  # approving queues the final render (cached, never twice)
+    review_prefetch: int = 3  # faithful previews queued ahead for the next N pending clips
+    clip_min_seconds: float = 3.0  # limits when adjusting start/end by hand
+    clip_max_seconds: float = 180.0
+
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
     # Tolerance (s) when checking if a golden moment falls inside a candidate (clipador eval).

@@ -73,6 +73,13 @@ def test_claim_respects_gpu_and_run_after(engine):
     assert queue.claim(engine, W, allow_gpu=True).id == gpu.id
 
 
+def test_claim_prefers_higher_priority_then_oldest(engine):
+    low = _job(engine, priority=-10)
+    a = _job(engine)
+    b = _job(engine)
+    assert [queue.claim(engine, W).id for _ in range(3)] == [a.id, b.id, low.id]
+
+
 def test_fail_retries_with_backoff_then_fails(engine):
     job = _job(engine, max_attempts=2)
     queue.claim(engine, W)

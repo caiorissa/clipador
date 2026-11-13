@@ -14,7 +14,7 @@
     </span>
     <strong>{{ s|hms }}</strong>
     <span class="muted small">{{ (en - s)|round(1) }} s{% if c.user_start is not none %} · ajustado{% endif %}</span>
-    {% if c.status == 'approved' %}<span class="badge ok">aprovado</span>{% elif c.status == 'rejected' %}<span class="badge fail">rejeitado</span>{% endif %}
+    {% if c.status == 'approved' %}<span class="badge ok">aprovado</span>{% elif c.status == 'rejected' %}<span class="badge fail">rejeitado</span>{% elif c.status == 'skipped' %}<span class="badge">pulado</span>{% endif %}
     {% if fb %}<span class="badge {{ 'ok' if fb.verdict == 'bom' else 'fail' }}">{{ fb.verdict }}</span>{% endif %}
     {% if e and e.precisa_de_contexto %}<span class="badge warn" title="Só faz sentido com o que veio antes">precisa de contexto</span>{% endif %}
   </div>

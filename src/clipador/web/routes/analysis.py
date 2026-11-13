@@ -19,6 +19,7 @@ from clipador.models import (
     Candidate,
     CandidateFeedback,
     CandidateStatus,
+    DecisionAction,
     PostDraft,
     RenderKind,
     Source,
@@ -28,7 +29,7 @@ from clipador.models import (
 from clipador.render.filters import LAYOUT_LABELS, normalize_layout, resolve_layout
 from clipador.render.styles import load_styles
 from clipador.render.subtitles import apply_overrides, words_in_window
-from clipador.services import analysis, rendering
+from clipador.services import analysis, rendering, review
 from clipador.services.enrichment import drafts_for, enrichments_for, score_parts, set_ranking
 from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
@@ -37,6 +38,12 @@ router = APIRouter()
 SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 
+STATUS_TO_ACTION = {
+    CandidateStatus.APPROVED: DecisionAction.APPROVE,
+    CandidateStatus.REJECTED: DecisionAction.REJECT,
+    CandidateStatus.SKIPPED: DecisionAction.SKIP,
+    CandidateStatus.SUGGESTED: DecisionAction.REOPEN,
+}
 SIGNAL_LABELS = {"audio": "Áudio", "chat": "Chat", "speech": "Fala", "keywords": "Palavras"}
 SORTS = {"final": "Nota final", "detect": "Detecção", "ia": "IA", "time": "Horário"}
 
@@ -333,15 +340,30 @@ async def candidate_feedback(request: Request, candidate_id: int, session: Sessi
 
 @router.post("/candidatos/{candidate_id}/status")
 async def candidate_status(request: Request, candidate_id: int, session: SessionDep):
+    """Toggle approved/rejected from the source page. Goes through the review service, so it is
+    recorded as a Decision (undoable in /revisao) and keeps the feedback in sync."""
+    settings: Settings = request.app.state.settings
     c = _candidate(session, candidate_id)
     status = str((await request.form()).get("status", ""))
     if status not in tuple(CandidateStatus):
         raise HTTPException(status_code=400, detail="status inválido")
-    c.status = CandidateStatus.SUGGESTED if c.status == status else status
-    c.updated_at = utcnow()
-    session.add(c)
-    session.commit()
-    return _card(request, session, c)
+    action = DecisionAction.REOPEN if c.status == status else STATUS_TO_ACTION.get(status)
+    if action is None:
+        return _card(request, session, c, "Esse status só é definido pelo render.")
+    try:
+        res = review.apply_decision(session, c.id, action, settings=settings)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return _card(request, session, _candidate(session, candidate_id), e.message)
+    return _card(request, session, res.candidate, notice=res.notice)
+
+
+def parse_seconds(raw) -> float | None:
+    try:
+        return float(str(raw if raw is not None else "").replace(",", ".").strip())
+    except ValueError:
+        return None
 
 
 @router.post("/candidatos/{candidate_id}/ajuste")
@@ -350,27 +372,16 @@ async def candidate_adjust(
 ):
     c = _candidate(session, candidate_id)
     form = await request.form()
-    if form.get("reset") == "1":
-        c.user_start = c.user_end = None
-    else:
-        try:
-            start = float(str(form.get("user_start", "")).replace(",", "."))
-            end = float(str(form.get("user_end", "")).replace(",", "."))
-        except ValueError:
-            return _card(request, session, c, "Início e fim devem ser números (segundos).")
-        source = session.get(Source, c.source_id)
-        limit = source.duration_seconds if source and source.duration_seconds else float("inf")
-        if not (0 <= start < end <= limit):
-            return _card(
-                request, session, c, "O fim precisa ser depois do início, dentro do vídeo."
-            )
-        if end - start > 180:
-            return _card(request, session, c, "Trecho longo demais (máx. 3 min).")
-        c.user_start, c.user_end = round(start, 2), round(end, 2)
-    c.updated_at = utcnow()
-    session.add(c)
-    session.commit()
-    return _card(request, session, c)
+    try:
+        c, warnings = review.edit_range(
+            session, settings, c.id, parse_seconds(form.get("user_start")),
+            parse_seconds(form.get("user_end")), reset=form.get("reset") == "1",
+        )  # fmt: skip
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return _card(request, session, _candidate(session, candidate_id), e.message)
+    return _card(request, session, c, notice=" ".join(warnings) or None)
 
 
 # --- step 3: AI enrichment, ranking, drafts ---------------------------------------------------

@@ -142,6 +142,9 @@ class Job(SQLModel, table=True):
     error: str | None = Field(default=None, sa_column=Column(Text))
     log: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
     needs_gpu: bool = False
+    # Higher runs first (ties: oldest first). Review prefetch uses a negative priority so
+    # renders asked for by hand always go ahead of it.
+    priority: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     locked_at: datetime | None = None  # also used as heartbeat while running
     locked_by: str | None = None
     run_after: datetime = Field(default_factory=utcnow, index=True)  # retry backoff
@@ -197,10 +200,12 @@ class CandidateStatus(StrEnum):
     SUGGESTED = "suggested"
     APPROVED = "approved"
     REJECTED = "rejected"
+    SKIPPED = "skipped"  # review: decide later (comes back at the end of the queue)
     RENDERED = "rendered"  # final render done
 
 
 RENDERABLE_STATUSES = (CandidateStatus.APPROVED, CandidateStatus.RENDERED)
+PENDING_STATUSES = (CandidateStatus.SUGGESTED, CandidateStatus.SKIPPED)
 
 
 class Candidate(SQLModel, table=True):
@@ -231,6 +236,9 @@ class Candidate(SQLModel, table=True):
     render_style: str | None = None  # caption style key
     # {"opening": bool, "credit": bool, "zoom": float, "foco_x": float, "peak_zoom": bool}
     render_options: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # Step 5 (review): when it was approved/rejected/skipped; pre-publish checks (5B).
+    reviewed_at: datetime | None = None
+    checks: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -255,8 +263,31 @@ class CandidateFeedback(SQLModel, table=True):
     candidate_id: int = Field(foreign_key="candidate.id", unique=True)
     verdict: str
     note: str = ""
+    reason_tag: str | None = None  # rejection reason (services.review.REJECT_REASONS)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class DecisionAction(StrEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+    SKIP = "skip"
+    UNDO = "undo"
+    EDIT_RANGE = "edit_range"
+    REOPEN = "reopen"
+
+
+class Decision(SQLModel, table=True):
+    """Review history (a global, persisted undo stack). `prev_state` is the candidate state
+    right before the action, so undo can restore it exactly."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="candidate.id", index=True)
+    action: str
+    reason_tag: str | None = None
+    note: str = ""
+    prev_state: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 # --- LLM enrichment (step 3) -----------------------------------------------------------------

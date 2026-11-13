@@ -45,8 +45,10 @@ def enqueue(
     payload: dict[str, Any] | None = None,
     dedupe: bool = True,
     needs_gpu: bool | None = None,
+    priority: int = 0,
 ) -> Job:
-    """Add a job (or return the already queued/running one for the same type+source)."""
+    """Add a job (or return the already queued/running one for the same type+source).
+    Higher `priority` is claimed first (default 0; review prefetch uses a negative value)."""
     stage = get_stage(job_type)
     existing = (
         None
@@ -67,6 +69,7 @@ def enqueue(
         payload=payload or {},
         needs_gpu=stage.needs_gpu if needs_gpu is None else needs_gpu,
         max_attempts=stage.max_attempts,
+        priority=priority,
         log=_stamp("Job criado e na fila."),
     )
     session.add(job)
@@ -136,7 +139,7 @@ def claim(
     candidate = (
         select(Job.id)
         .where(Job.status == JobStatus.QUEUED, Job.run_after <= now)
-        .order_by(Job.created_at, Job.id)
+        .order_by(col(Job.priority).desc(), Job.created_at, Job.id)
         .limit(1)
     )
     if not allow_gpu:

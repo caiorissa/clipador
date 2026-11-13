@@ -19,6 +19,7 @@ from clipador.models import (
     Candidate,
     CandidateFeedback,
     Job,
+    JobStatus,
     Source,
     SourceStatus,
     StageArtifact,
@@ -100,9 +101,11 @@ def enqueue_render(
     source_id: int,
     candidate_ids: list[int],
     kind: str = "final",
+    priority: int = 0,
 ) -> tuple[Job | None, list, list]:
     """Create Render rows (reusing cached ones) and queue one job for the missing ones.
-    Returns (job or None if everything was cached, to_render, reused)."""
+    Returns (job or None if everything was cached, to_render, reused).
+    A render already waiting in a lower-priority job (e.g. review prefetch) is bumped up."""
     from clipador.services import rendering
 
     if not candidate_ids:
@@ -110,12 +113,17 @@ def enqueue_render(
     todo, reused = rendering.request_renders(
         session, session.get_bind(), settings, candidate_ids, kind
     )
+    for r in todo:
+        waiting = session.get(Job, r.job_id) if r.job_id is not None else None
+        if waiting and waiting.status == JobStatus.QUEUED and waiting.priority < priority:
+            waiting.priority = priority
+            session.add(waiting)
     fresh = [r for r in todo if r.job_id is None]
     job = None
     if fresh:
         job = queue.enqueue(
             session, "render", source_id, {"render_ids": [r.id for r in fresh]}, dedupe=False,
-            needs_gpu=not settings.render_parallel_with_gpu_jobs,
+            needs_gpu=not settings.render_parallel_with_gpu_jobs, priority=priority,
         )  # fmt: skip
         for r in fresh:
             r.job_id = job.id
