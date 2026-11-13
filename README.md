@@ -97,24 +97,50 @@ descarregado no fim do estágio (`keep_alive=0`); os dois valores aparecem no lo
 
 ## Cortes prontos (Passo 4)
 
-Na página da fonte, aprove os candidatos e use **Renderizar aprovados** (ou "Renderizar corte" em
-cada um). Cada corte sai em `data/clips/<fonte>/` como **MP4 1080×1920** pronto para Shorts,
-TikTok e Reels, mais um `.txt` com título, descrição, hashtags e crédito de cada plataforma.
+Na página da fonte, em cada candidato (seção **Corte vertical 9:16**):
 
-- **Layouts:** *fundo borrado* (o jogo no meio, o mesmo vídeo borrado atrás) ou *facecam embaixo*
-  (jogo em cima, câmera do streamer embaixo). Para a facecam, preencha o retângulo no cadastro do
-  streamer em pixels de um quadro **1920×1080** (o Clipador ajusta para a resolução real).
-- **Legenda palavra por palavra** (ASS) com 4 estilos; a palavra falada fica destacada. Antes de
-  renderizar, corrija nomes e gírias no campo "Legenda": os tempos do Whisper são reaproveitados.
-- **Título curto no topo** (sugerido pela IA ou pelo rascunho; editável ou vazio) e **zoom rápido no
-  pico** do momento.
-- Áudio normalizado em **−14 LUFS**; vídeo com **NVENC** na GPU (cai para libx264 se precisar).
-- **Vídeo longo 16:9:** junta os aprovados em ordem cronológica, com legenda, em `longo_*.mp4`, e
-  gera os **capítulos** para colar na descrição do YouTube.
+1. Escolha o **layout** e o **estilo de legenda** (os padrões vêm do streamer).
+2. **👁 Prévia rápida** (540×960): mesma geometria e legenda do final, pronta em segundos.
+3. **🎬 Renderizar final** (1080×1920, H.264 + AAC, faststart): MP4 em `data/clips/<fonte>/`
+   mais um `.txt` com título/descrição/hashtags/crédito de cada plataforma. Ou use
+   **Renderizar aprovados** para todos de uma vez.
 
-Padrões dos cortes (seguindo a prática comum): começam ~4 s antes do pico e duram de 30 a 60 s;
-ajuste no painel "Ajustes da detecção". Renderizar de novo com os mesmos ajustes não refaz nada.
+- **Layouts:** *Fundo borrado*; *Facecam embaixo* (jogo em cima, câmera embaixo); *Jogo cheio*
+  (recorte 9:16 do jogo, com **zoom** e **foco horizontal** 0–1). Sem facecam definida, cai para
+  fundo borrado e avisa na tela.
+- **Facecam:** na página do streamer, arraste um retângulo sobre um quadro de uma fonte dele
+  (precisa de pelo menos uma fonte baixada). Fica salvo em coordenadas relativas (0–1): vale
+  para 720p, 1080p, 1440p, 21:9…
+- **Legendas palavra por palavra** (ASS) com a fonte embutida **Anton** (licença OFL, em
+  `assets/fonts/`), 2–4 palavras por vez, no máximo 2 linhas, nunca menos de 0,25 s na tela, dentro
+  da **zona segura** (acima dos ~20% de baixo e abaixo dos ~10% de cima, que a interface das
+  plataformas cobre). Estilos editáveis em `config/caption_styles.toml` (`classico`,
+  `destaque_amarelo`, `pop`, `caixa`, `neon`). Correções de palavras ficam em
+  `caption_overrides` e mantêm os tempos (o editor completo vem no Passo 5).
+- **Texto de abertura** (2 s, com fade) e **crédito "via @streamer"** discreto durante todo o clip;
+  liga/desliga por streamer e por corte. **Zoom rápido no pico** opcional.
+- **Áudio** em **−14 LUFS** (ganho medido + limitador de pico, ±1,5 LU), fades de 80 ms, estéreo;
+  vídeo em **taxa constante** (VFR da Twitch vira CFR, até 60 fps).
+- Cada render é **validado com ffprobe** (resolução, codecs, áudio, duração ±0,15 s, faststart) e
+  só ganha o nome final depois disso; cancelar ou falhar não deixa arquivo pela metade.
+  Renderizar de novo com os mesmos ajustes reaproveita o arquivo.
+- Por padrão, o render espera o mesmo lock de GPU do Whisper/Ollama
+  (`CLIPADOR_RENDER_PARALLEL_WITH_GPU_JOBS=false`); um render por vez.
+- **Vídeo longo 16:9:** junta os aprovados em ordem cronológica, com os **capítulos** para o YouTube.
 
+**Velocidade medida** (RTX 5060, clip de 40 s 1080p60, inclui medir o áudio):
+
+| encoder | prévia | final | tamanho do final |
+|---|---|---|---|
+| NVENC (`h264_nvenc`) | 7,7x tempo real (5 s) | 4,7x (8,5 s) | ~55 MB |
+| libx264 | 7,9x (5 s) | 4,0x (10 s) | ~12 MB |
+
+Meça no seu PC (com um candidato real ou um vídeo de teste):
+
+```powershell
+uv run clipador render-bench            # vídeo de teste 1080p60 de 40 s
+uv run clipador render-bench 12         # candidato #12
+```
 ## Requisitos (Windows 11)
 
 1. **Python**: o projeto está fixado em **3.12** (`.python-version`), por compatibilidade com
