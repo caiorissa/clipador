@@ -207,7 +207,7 @@ def build_ass(
         f"Style: Opening,{EMBEDDED_FONT},{round(70 * sc)},&H00FFFFFF,&H00FFFFFF,&H20000000,"
         f"&H20000000,0,0,0,0,100,100,0,0,3,{round(16 * sc)},0,8,{round(70 * sc)},"
         f"{round(70 * sc)},{zone.top_margin},1",
-        f"Style: Credit,{EMBEDDED_FONT},{round(36 * sc)},&H30FFFFFF,&H30FFFFFF,&H80000000,"
+        f"Style: Credit,{EMBEDDED_FONT},{round(46 * sc)},&H18FFFFFF,&H18FFFFFF,&H70000000,"
         f"&H80000000,0,0,0,0,100,100,1,0,1,{max(1, round(2 * sc))},0,8,{round(60 * sc)},"
         f"{round(60 * sc)},{zone.credit_margin},1",
         "", "[Events]",

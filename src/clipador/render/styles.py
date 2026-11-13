@@ -21,7 +21,7 @@ class SubtitleStyle:
     label: str
     mode: str = "destaque"
     font: str = EMBEDDED_FONT
-    font_size: int = 96
+    font_size: int = 110
     color: str = "#FFFFFF"
     highlight: str = "#FFE000"
     outline_color: str = "#000000"
