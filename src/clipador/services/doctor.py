@@ -236,6 +236,73 @@ def check_ollama(settings: Settings) -> list[CheckResult]:
     return out
 
 
+REQUIRED_FILTERS = ("subtitles", "loudnorm", "ebur128", "alimiter", "boxblur", "overlay")
+
+
+def check_render_filters(settings: Settings) -> CheckResult:
+    """ffmpeg must have libass (subtitles filter) and the filters the renderer uses."""
+    name = "ffmpeg para renderizar"
+    try:
+        res = subprocess.run(
+            [settings.ffmpeg_path, "-hide_banner", "-filters"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return CheckResult(name, CheckStatus.FAIL, f"não foi possível listar os filtros: {e}")
+    have = {ln.split()[1] for ln in res.stdout.splitlines() if len(ln.split()) > 2}
+    missing = [f for f in REQUIRED_FILTERS if f not in have]
+    if missing:
+        return CheckResult(
+            name,
+            CheckStatus.FAIL,
+            "faltam filtros: " + ", ".join(missing)
+            + (" (sem libass: legendas não podem ser queimadas)" if "subtitles" in missing else ""),
+            "Use o build 'full' ou 'essentials' da gyan.dev (https://www.gyan.dev/ffmpeg/builds/), "
+            "que inclui libass.",
+        )  # fmt: skip
+    return CheckResult(
+        name, CheckStatus.OK, "libass (legendas) e " + ", ".join(REQUIRED_FILTERS[1:])
+    )
+
+
+def check_fonts(settings: Settings) -> CheckResult:
+    from clipador.render.styles import DEFAULT_FONTS_DIR, EMBEDDED_FONT, load_styles
+
+    d = settings.fonts_dir or DEFAULT_FONTS_DIR
+    fonts = sorted(p.name for p in d.glob("*.[ot]tf")) if d.is_dir() else []
+    if not fonts:
+        return CheckResult(
+            "Fonte das legendas", CheckStatus.FAIL, f"nenhuma fonte em {d}",
+            "A fonte embutida (Anton, OFL) deve estar em assets/fonts; restaure o repositório.",
+        )  # fmt: skip
+    try:
+        styles = load_styles(settings.caption_styles_path)
+    except (OSError, ValueError) as e:
+        return CheckResult("Fonte das legendas", CheckStatus.FAIL,
+                           f"estilos de legenda inválidos: {e}",
+                           "Confira config/caption_styles.toml.")  # fmt: skip
+    license_ok = any((d / n).is_file() for n in ("OFL.txt", "LICENSE.txt", "LICENSE"))
+    detail = f"{', '.join(fonts)} em {d} · {len(styles)} estilos ({', '.join(styles)})"
+    if EMBEDDED_FONT not in "".join(fonts):
+        return CheckResult("Fonte das legendas", CheckStatus.WARN, detail,
+                           f"A fonte padrão '{EMBEDDED_FONT}' não foi encontrada.")  # fmt: skip
+    if not license_ok:
+        return CheckResult("Fonte das legendas", CheckStatus.WARN, detail,
+                           "Falta o arquivo de licença da fonte (OFL.txt).")  # fmt: skip
+    return CheckResult("Fonte das legendas", CheckStatus.OK, detail)
+
+
+def check_clips_space(settings: Settings) -> CheckResult:
+    settings.clips_dir.mkdir(parents=True, exist_ok=True)
+    free_gb = shutil.disk_usage(settings.clips_dir).free / 1024**3
+    used = sum(f.stat().st_size for f in settings.clips_dir.rglob("*.mp4")) / 1024**3
+    detail = f"{settings.clips_dir} · {used:.1f} GB em cortes · {free_gb:.1f} GB livres"
+    if free_gb < 5:
+        return CheckResult("Espaço para cortes", CheckStatus.WARN, detail,
+                           "Cada corte final tem ~10-40 MB; libere espaço.")  # fmt: skip
+    return CheckResult("Espaço para cortes", CheckStatus.OK, detail)
+
+
 def check_faster_whisper() -> CheckResult:
     try:
         from importlib.metadata import version
@@ -352,6 +419,9 @@ def run_all(settings: Settings) -> list[CheckResult]:
         check_cookies(settings),
         check_gpu(),
         check_nvenc(settings),
+        check_render_filters(settings),
+        check_fonts(settings),
+        check_clips_space(settings),
         check_faster_whisper(),
         check_cuda_whisper(settings),
         check_vram_free(),

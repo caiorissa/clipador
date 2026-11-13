@@ -102,38 +102,47 @@ def _crop_aspect(src_w: int, src_h: int, out_w: int, out_h: int, opts: LayoutOpt
     return f"crop={cw}:{ch}:{x}:{y},scale={out_w}:{out_h}"
 
 
-def layout_blur(src_w: int, src_h: int, zoom: Zoom) -> list[str]:
-    fg_h = _even(OUT_W * src_h / src_w)
-    if fg_h > OUT_H:  # taller than 9:16: fit height instead
-        fg_w, fg_h = _even(OUT_H * src_w / src_h), OUT_H
+def layout_blur(src_w: int, src_h: int, zoom: Zoom, w: int = OUT_W, h: int = OUT_H) -> list[str]:
+    """Game at full width over a blurred, darkened copy of itself. The background is blurred at
+    1/4 resolution and scaled up: same look, a fraction of the cost of blurring 1080x1920."""
+    fg_h = _even(w * src_h / src_w)
+    if fg_h > h:  # taller than 9:16: fit height instead
+        fg_w, fg_h = _even(h * src_w / src_h), h
     else:
-        fg_w = OUT_W
+        fg_w = w
+    bw, bh = _even(w / 4), _even(h / 4)
     return [
         "[0:v]setsar=1,split=2[s1][s2]",
-        f"[s1]scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=increase,crop={OUT_W}:{OUT_H},"
-        "boxblur=24:2,eq=brightness=-0.10:saturation=1.15[bg]",
+        f"[s1]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},"
+        f"boxblur=8:2,eq=brightness=-0.10:saturation=1.15,scale={w}:{h}:flags=bilinear[bg]",
         f"[s2]scale={fg_w}:{fg_h}[fg]",
         _zoomed("fg", "fgz", fg_w, fg_h, zoom),
         "[bg][fgz]overlay=(W-w)/2:(H-h)/2[v0]",
     ]
 
 
-def layout_facecam(src_w: int, src_h: int, rect, zoom: Zoom, opts: LayoutOptions) -> list[str]:
-    x, y, w, h = rect_to_pixels(rect, src_w, src_h)
+def layout_facecam(src_w: int, src_h: int, rect, zoom: Zoom, opts: LayoutOptions,
+                   w: int = OUT_W, h: int = OUT_H) -> list[str]:  # fmt: skip
+    """Game on top (2/3 of the height), facecam crop below."""
+    x, y, cw, ch = rect_to_pixels(rect, src_w, src_h)
+    game_h = _even(h * GAME_H / OUT_H)
+    cam_h = h - game_h
     return [
         "[0:v]setsar=1,split=2[s1][s2]",
-        f"[s1]{_crop_aspect(src_w, src_h, OUT_W, GAME_H, opts)}[g]",
-        _zoomed("g", "gz", OUT_W, GAME_H, zoom),
-        f"[s2]crop={w}:{h}:{x}:{y},scale={OUT_W}:{CAM_H}:force_original_aspect_ratio=increase,"
-        f"crop={OUT_W}:{CAM_H}[cam]",
+        f"[s1]{_crop_aspect(src_w, src_h, w, game_h, opts)}[g]",
+        _zoomed("g", "gz", w, game_h, zoom),
+        f"[s2]crop={cw}:{ch}:{x}:{y},scale={w}:{cam_h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{cam_h}[cam]",
         "[gz][cam]vstack=inputs=2[v0]",
     ]
 
 
-def layout_jogo_cheio(src_w: int, src_h: int, zoom: Zoom, opts: LayoutOptions) -> list[str]:
+def layout_jogo_cheio(src_w: int, src_h: int, zoom: Zoom, opts: LayoutOptions,
+                      w: int = OUT_W, h: int = OUT_H) -> list[str]:  # fmt: skip
+    """Center 9:16 crop of the game, `zoom` tighter and shifted horizontally by `foco_x`."""
     return [
-        f"[0:v]setsar=1,{_crop_aspect(src_w, src_h, OUT_W, OUT_H, opts)}[base]",
-        _zoomed("base", "v0", OUT_W, OUT_H, zoom),
+        f"[0:v]setsar=1,{_crop_aspect(src_w, src_h, w, h, opts)}[base]",
+        _zoomed("base", "v0", w, h, zoom),
     ]
 
 
@@ -150,21 +159,21 @@ def vertical_graph(
     out_size: tuple[int, int] = (OUT_W, OUT_H),
     captions: bool = True,
 ) -> str:
-    """Full filter_complex with outputs [v] and [a]. Geometry is always built at 1080x1920 and
-    scaled at the very end, so the preview looks exactly like the final render."""
+    """Full filter_complex with outputs [v] and [a], built directly at `out_size` (the preview
+    uses the same proportions, so it matches the final; the ASS is authored at 1080x1920 and
+    libass scales it to the frame)."""
     opts = opts or LayoutOptions()
+    w, h = out_size
     if layout == "facecam_embaixo" and rect:
-        parts = layout_facecam(src_w, src_h, rect, zoom, opts)
+        parts = layout_facecam(src_w, src_h, rect, zoom, opts, w, h)
     elif layout == "jogo_cheio":
-        parts = layout_jogo_cheio(src_w, src_h, zoom, opts)
+        parts = layout_jogo_cheio(src_w, src_h, zoom, opts, w, h)
     else:
-        parts = layout_blur(src_w, src_h, zoom)
+        parts = layout_blur(src_w, src_h, zoom, w, h)
     fade_out = max(0.0, duration - 0.25)
     tail = f"[v0]fade=t=in:d=0.15,fade=t=out:st={fade_out:.3f}:d=0.25"
     if captions:
         tail += f",subtitles={SUBS_FILE}:fontsdir={FONTS_SUBDIR}"
-    if out_size != (OUT_W, OUT_H):
-        tail += f",scale={out_size[0]}:{out_size[1]}:flags=bicubic"
     parts.append(tail + ",format=yuv420p[v]")
     parts.append(f"[0:a]{audio_filter}[a]")
     return ";".join(parts)

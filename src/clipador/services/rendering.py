@@ -287,7 +287,9 @@ def build_args(plan: RenderPlan, settings: Settings, encoder: str, audio_filter:
     )  # fmt: skip
     return ["-ss", f"{plan.start:.3f}", "-t", f"{plan.duration:.3f}", "-i", str(plan.video),
             "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
-            *filters.output_rate_args(plan.fps, settings.render_max_fps),
+            *filters.output_rate_args(
+                plan.fps, 30 if plan.kind == RenderKind.PREVIEW else settings.render_max_fps
+            ),
             *filters.encoder_args(encoder, preview=plan.kind == RenderKind.PREVIEW),
             str(out)]  # fmt: skip
 

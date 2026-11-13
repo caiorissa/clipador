@@ -171,7 +171,7 @@ def test_graphs_per_layout():
     g = filters.vertical_graph("jogo_cheio", 1920, 1080, 5, filters.Zoom(None), af, opts=right)
     assert "crop=608:1080:1312:0" in g
     g = filters.vertical_graph("blur", 1920, 1080, 5, filters.Zoom(None), af, out_size=(540, 960))
-    assert g.index("subtitles=") < g.index("scale=540:960")  # preview = scaled final
+    assert "[s2]scale=540:304[fg]" in g and "scale=540:960:flags=bilinear[bg]" in g  # same layout
     assert filters.output_rate_args(59.94, 60) == ["-fps_mode", "cfr", "-r", "59.94"]
     assert filters.output_rate_args(144, 60)[-1] == "60"
 

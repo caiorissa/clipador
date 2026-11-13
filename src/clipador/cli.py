@@ -212,6 +212,41 @@ def cmd_llm_bench(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_render_bench(settings: Settings, args) -> int:
+    import tempfile
+    from pathlib import Path
+
+    from sqlmodel import Session
+
+    from clipador.errors import ClipadorError
+    from clipador.models import Candidate
+    from clipador.services import renderbench, rendering
+
+    settings.ensure_dirs()
+    encoders = [e.strip() for e in args.encoders.split(",") if e.strip()]
+    encoders = [{"nvenc": "h264_nvenc", "x264": "libx264"}.get(e, e) for e in encoders]
+    with tempfile.TemporaryDirectory(dir=settings.tmp_dir) as tmp:
+        if args.candidate_id is None:
+            print(f"Sem candidato: gerando um vídeo de teste 1080p60 de {args.seconds:.0f}s…")
+            plan = renderbench.synthetic_plan(Path(tmp), args.seconds)
+        else:
+            engine = _engine(settings)
+            with Session(engine) as s:
+                c = s.get(Candidate, args.candidate_id)
+                if c is None:
+                    print(f"Candidato #{args.candidate_id} não existe.", file=sys.stderr)
+                    return 1
+                try:
+                    plan = rendering.plan_render(s, engine, settings, c, "final")
+                except ClipadorError as e:
+                    print(e.message, file=sys.stderr)
+                    return 1
+        rows = renderbench.run_bench(settings, plan, encoders)
+    print()
+    print(renderbench.format_rows(rows, plan.duration))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_stdout()
     parser = argparse.ArgumentParser(prog="clipador", description="Clipador: VODs -> clips 9:16")
@@ -233,6 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--run", type=int, help="id da análise (padrão: a mais recente)")
     ev.add_argument("--tolerance", type=float, help="folga em segundos (padrão 2)")
     ev.add_argument("--with-llm", action="store_true", help="compara com a reordenação da IA")
+    rb = sub.add_parser("render-bench", help="mede a velocidade do render (prévia e final)")
+    rb.add_argument("candidate_id", type=int, nargs="?", help="sem id: usa um vídeo de teste")
+    rb.add_argument("--encoders", default="nvenc,x264")
+    rb.add_argument("--seconds", type=float, default=40.0, help="duração do vídeo de teste")
     lb = sub.add_parser("llm-bench", help="mede velocidade/JSON/VRAM de modelos do Ollama")
     lb.add_argument("--source", type=int, help="fonte analisada para amostrar candidatos")
     lb.add_argument("--n", type=int, default=20)
@@ -246,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.command == "render-bench":
+        return cmd_render_bench(settings, args)
     if args.command == "llm-bench":
         return cmd_llm_bench(settings, args)
     if args.command == "bench-transcribe":
