@@ -28,8 +28,8 @@ from clipador.models import (
 )
 from clipador.render.filters import LAYOUT_LABELS, normalize_layout, resolve_layout
 from clipador.render.styles import load_styles
-from clipador.render.subtitles import apply_overrides, words_in_window
-from clipador.services import analysis, rendering, review
+from clipador.render.subtitles import apply_glossary, words_in_window
+from clipador.services import analysis, captions, rendering, review
 from clipador.services.enrichment import drafts_for, enrichments_for, score_parts, set_ranking
 from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
@@ -247,7 +247,7 @@ def _card_items(
     items = []
     for c, fb in cands:
         d = drafts.get(c.id, {})
-        shown = apply_overrides(words_in_window(words, c.eff_start, c.eff_end), c.caption_overrides)
+        shown, stale = captions.shown_words(words, c, streamer.glossary if streamer else None)
         r = renders.get(c.id, {})
         wanted = c.render_layout or (streamer.default_layout if streamer else "blur")
         items.append(
@@ -261,6 +261,8 @@ def _card_items(
                 "final": r.get(RenderKind.FINAL),
                 "progress": {k: rendering.job_progress(session, v) for k, v in r.items()},
                 "sub_text": " ".join(w.text for w in shown),
+                "stale_captions": stale,
+                "ready": review.ready_to_publish(c, review.has_alerts(enr.get(c.id))),
                 "title_suggestion": rendering.suggested_title(enr.get(c.id), d.get("youtube")),
                 "layout": normalize_layout(wanted),
                 "layout_warning": resolve_layout(wanted, rect)[1],
@@ -496,7 +498,9 @@ async def save_draft(request: Request, draft_id: int, session: SessionDep):
 # --- step 4: rendering ---------------------------------------------------------------------------
 
 
-def _save_render_options(c: Candidate, form, words_all, settings: Settings) -> str | None:
+def _save_render_options(
+    c: Candidate, form, words_all, settings: Settings, glossary: dict | None = None
+) -> str | None:
     """Apply the form to the candidate. Returns a PT-BR error or None."""
     c.render_layout = normalize_layout(str(form.get("layout"))) if form.get("layout") else None
     style = str(form.get("style", ""))
@@ -520,15 +524,21 @@ def _save_render_options(c: Candidate, form, words_all, settings: Settings) -> s
         tokens = str(form["subtitle_text"]).split()
         if window and len(tokens) != len(window):
             return (
-                f"A legenda tem {len(window)} palavras e você escreveu {len(tokens)}. Por enquanto "
-                "corrija palavra por palavra (use '-' para esconder uma palavra); o editor "
-                "completo vem no Passo 5."
+                f"A legenda tem {len(window)} palavras e você escreveu {len(tokens)}: corrija "
+                "palavra por palavra (use '-' para esconder uma palavra) ou use o editor de "
+                "legenda do card."
             )
-        overrides = {
-            str(w.idx): ("" if t == "-" else t) for w, t in zip(window, tokens, strict=False)
-            if t != w.text
-        }  # fmt: skip
+        glossed = apply_glossary(window, glossary)  # what the caption shows without corrections
+        in_window = {str(w.idx) for w in window}
+        overrides = {k: v for k, v in (c.caption_overrides or {}).items() if k not in in_window}
+        originals = {k: v for k, v in (c.caption_override_originals or {}).items()
+                     if k not in in_window}  # fmt: skip
+        for w, g, t in zip(window, glossed, tokens, strict=False):
+            if t != g.text:
+                overrides[str(w.idx)] = "" if t == "-" else t
+                originals[str(w.idx)] = w.text
         c.caption_overrides = overrides or None
+        c.caption_override_originals = originals or None
     c.updated_at = utcnow()
     return None
 
@@ -540,7 +550,8 @@ async def render_candidate(request: Request, candidate_id: int, session: Session
     c = _candidate(session, candidate_id)
     form = await request.form()
     words_all = rendering.transcript_words(session.get_bind(), settings, c.source_id)
-    err = _save_render_options(c, form, words_all, settings)
+    st = captions.streamer_of(session, c)
+    err = _save_render_options(c, form, words_all, settings, st.glossary if st else None)
     if err:
         session.rollback()
         return _card(request, session, _candidate(session, candidate_id), err)

@@ -14,7 +14,9 @@
     {% if c.status == 'approved' %}<span class="badge ok">aprovado</span>{% elif c.status == 'rejected' %}<span class="badge fail">rejeitado</span>{% elif c.status == 'skipped' %}<span class="badge">pulado</span>{% endif %}
     {% if fb %}<span class="badge {{ 'ok' if fb.verdict == 'bom' else 'fail' }}">{{ fb.verdict }}</span>{% endif %}
     {% if e and e.precisa_de_contexto %}<span class="badge warn" title="Só faz sentido com o que veio antes">precisa de contexto</span>{% endif %}
+    {% if item.ready %}<span class="badge ready" title="aprovado e com as verificações marcadas">✔ pronto para publicar</span>{% endif %}
   </div>
+  {% if item.stale_captions %}<div class="flash warn small">⚠ {{ item.stale_captions|length }} correção(ões) de legenda obsoleta(s): a transcrição mudou e elas não estão sendo aplicadas. Abra “Corrigir a legenda” para remover.</div>{% endif %}
   {% if card_error %}<div class="flash error small">{{ card_error }}</div>{% endif %}
   {% if card_notice %}<div class="flash small">{{ card_notice }}</div>{% endif %}
   {% include "analysis/_alerts.html" %}
@@ -107,9 +109,11 @@
         <label>Texto de abertura <span class="small muted">(vazio = sem texto)</span>
           <input name="overlay_title" maxlength="80" value="{{ c.overlay_title if c.overlay_title is not none else (item.title_suggestion or '') }}">
         </label>
-        <label>Legenda (corrija palavra por palavra; "-" esconde uma palavra; os tempos não mudam)
-          <textarea name="subtitle_text" rows="3">{{ item.sub_text }}</textarea>
-        </label>
+        <div class="small">Legenda: <span class="muted" data-sub-text>{{ item.sub_text or '(sem fala)' }}</span></div>
+        <details class="cap-details">
+          <summary class="small">✏️ Corrigir a legenda palavra a palavra</summary>
+          <div class="cap-editor-mount" data-candidate="{{ c.id }}"></div>
+        </details>
         <div class="cand-actions">
           <button class="btn small" name="kind" value="preview">👁 Prévia rápida</button>
           <button class="btn small primary" name="kind" value="final">🎬 Renderizar final</button>

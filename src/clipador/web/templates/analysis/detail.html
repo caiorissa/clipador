@@ -3,6 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
 <script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/caption_editor.js"></script>
 
 <div class="page-head">
   <div>
@@ -202,6 +203,29 @@
     v.dataset.start = s; v.dataset.end = e;
     if (b.dataset.preview !== undefined) { v.currentTime = s; v.play(); }
   });
+
+  // --- caption editor (static/caption_editor.js), mounted when its <details> opens ---
+  document.addEventListener("toggle", (ev) => {
+    const det = ev.target;
+    if (!det.classList || !det.classList.contains("cap-details") || !det.open || !window.CaptionEditor) return;
+    const el = det.querySelector(".cap-editor-mount");
+    if (el.dataset.mounted) return;
+    el.dataset.mounted = "1";
+    const card = det.closest(".cand"), v = card.querySelector("video.clip-player");
+    const subText = card.querySelector("[data-sub-text]");
+    const ed = window.CaptionEditor.mount(el, {
+      candidate: Number(el.dataset.candidate),
+      getTime: () => (v && !v.paused ? v.currentTime : -1),
+      getRange: () => [Number(v.dataset.start), Number(v.dataset.end)],
+      onData: (d) => {
+        const r = [Number(v.dataset.start), Number(v.dataset.end)];
+        const t = (d.words || []).filter((w) => w.e > r[0] && w.s < r[1]).map((w) => w.t).join(" ");
+        if (subText) subText.textContent = t || "(sem fala)";
+      },
+    });
+    ed.reload();
+    if (v) v.addEventListener("timeupdate", ed.tick);
+  }, true);
 
   // --- post drafts: pick a suggested title, live character counters ---
   document.body.addEventListener("click", (ev) => {

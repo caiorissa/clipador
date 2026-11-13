@@ -38,8 +38,8 @@ from clipador.render.styles import DEFAULT_FONTS_DIR, get_style
 from clipador.render.subtitles import (
     IWord,
     Overlays,
-    apply_overrides,
     build_ass,
+    caption_words,
     credit_overlay,
     safe_zone,
     words_in_window,
@@ -142,10 +142,13 @@ def plan_render(
     fps = float(info.get("fps") or 30)
 
     start, end = c.eff_start, c.eff_end
-    words = apply_overrides(
+    # glossary -> valid per-word corrections; the resulting words go into the params hash, so a
+    # glossary change only invalidates the renders whose captions it actually changes.
+    words, _stale = caption_words(
         words_in_window(transcript_words(engine, settings, source.id), start, end),
-        c.caption_overrides,
-    )
+        streamer.glossary if streamer else None, c.caption_overrides,
+        c.caption_override_originals,
+    )  # fmt: skip
     rect = streamer.facecam_rect if streamer else None
     wanted = c.render_layout or (streamer.default_layout if streamer else "blur")
     layout, layout_warning = filters.resolve_layout(wanted, rect)

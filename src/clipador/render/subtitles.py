@@ -84,6 +84,93 @@ def words_in_window(words: list[tuple[float, float, str]], start: float, end: fl
     return out
 
 
+_EDGE_PUNCT = re.compile(r"^([^\w]*)(.*?)([^\w]*)$", re.UNICODE | re.DOTALL)
+
+
+def split_punct(text: str) -> tuple[str, str, str]:
+    """'¿Polícia!!' -> ('¿', 'Polícia', '!!'): punctuation glued to the edges of a word."""
+    m = _EDGE_PUNCT.match(text or "")
+    return (m.group(1), m.group(2), m.group(3)) if m else ("", text or "", "")
+
+
+def norm_word(text: str) -> str:
+    """Glossary key: no adjacent punctuation, lowercase, no accents ('Polícia!' -> 'policia')."""
+    core = split_punct(text)[1]
+    nfkd = unicodedata.normalize("NFKD", core.casefold())
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def normalize_glossary(glossary: dict | None) -> dict[str, str]:
+    """{wrong: right} -> {norm_word(wrong): right}; invalid/empty entries dropped."""
+    out: dict[str, str] = {}
+    for k, v in (glossary or {}).items():
+        key, val = norm_word(str(k)), clean_text(str(v))
+        if key and val and " " not in key:
+            out[key] = val
+    return out
+
+
+def apply_glossary(words: list[IWord], glossary: dict | None) -> list[IWord]:
+    """Replace whole words found in the glossary (ignoring case, accents and the punctuation
+    glued to them, which is kept: 'policia!' + {'polícia': 'viatura'} -> 'viatura!').
+    Timing and global indexes never change; the input list is not modified."""
+    g = normalize_glossary(glossary)
+    if not g:
+        return words
+    out = []
+    for w in words:
+        lead, core, trail = split_punct(w.text)
+        right = g.get(norm_word(core)) if core else None
+        if right is not None:
+            w = IWord(w.idx, w.start, w.end, f"{lead}{right}{trail}")
+        out.append(w)
+    return out
+
+
+@dataclass(frozen=True)
+class StaleOverride:
+    idx: int
+    text: str  # the correction
+    original: str  # transcript text when it was corrected
+    current: str  # transcript text now
+
+
+def resolve_overrides(
+    words: list[IWord], overrides: dict | None, originals: dict | None
+) -> tuple[dict[int, str], list[StaleOverride]]:
+    """Split the corrections of the words in `words` (raw transcript text, BEFORE the
+    glossary) into valid ones and stale ones (the transcript was re-generated and the word at
+    that index is not the one that was corrected). Overrides without a recorded original (made
+    before 5B) are trusted. Overrides of indexes outside `words` are neither: they stay saved
+    and apply again if the clip edges move back over them."""
+    ov = {int(k): str(v) for k, v in (overrides or {}).items()}
+    orig = {int(k): str(v) for k, v in (originals or {}).items()}
+    by_idx = {w.idx: w for w in words}
+    valid: dict[int, str] = {}
+    stale: list[StaleOverride] = []
+    for i, text in sorted(ov.items()):
+        w = by_idx.get(i)
+        if w is None:
+            continue
+        if i in orig and clean_text(orig[i]) != w.text:
+            stale.append(StaleOverride(i, text, orig[i], w.text))
+        else:
+            valid[i] = text
+    return valid, stale
+
+
+def caption_words(
+    window: list[IWord],
+    glossary: dict | None,
+    overrides: dict | None,
+    originals: dict | None,
+) -> tuple[list[IWord], list[StaleOverride]]:
+    """What the captions show: transcript -> streamer glossary -> per-word corrections (valid
+    ones only). Used by the live preview, the render (.ass) and the source page."""
+    valid, stale = resolve_overrides(window, overrides, originals)
+    return apply_overrides(apply_glossary(window, glossary), valid), stale
+
+
 def apply_overrides(words: list[IWord], overrides: dict | None) -> list[IWord]:
     """Replace the text of words by global index; timing never changes. Empty text = hide."""
     if not overrides:

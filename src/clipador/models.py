@@ -62,6 +62,9 @@ class Streamer(SQLModel, table=True):
     facecam_box: list[float] | None = Field(default=None, sa_column=Column(JSON))
     show_credit: bool = True  # "via @handle" on screen
     show_opening_text: bool = True
+    # Caption glossary {wrong: right}: whole-word, case/accent-insensitive, applied to the
+    # captions only (the saved transcript is never changed). Step 5B.
+    glossary: dict[str, str] | None = Field(default=None, sa_column=Column(JSON))
     active: bool = True
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -231,6 +234,9 @@ class Candidate(SQLModel, table=True):
     final_rank: int | None = None
     # Step 4 (render): per-candidate choices (None = streamer default).
     caption_overrides: dict[str, str] | None = Field(default=None, sa_column=Column(JSON))
+    # {index: transcript text when it was corrected}: an override whose original no longer
+    # matches the (re-generated) transcript is stale and is not applied (5B).
+    caption_override_originals: dict[str, str] | None = Field(default=None, sa_column=Column(JSON))
     overlay_title: str | None = None  # opening text (None = suggestion from the LLM/draft)
     render_layout: str | None = None
     render_style: str | None = None  # caption style key
@@ -275,6 +281,7 @@ class DecisionAction(StrEnum):
     UNDO = "undo"
     EDIT_RANGE = "edit_range"
     REOPEN = "reopen"
+    EDIT_CHECKS = "edit_checks"  # pre-publish checks (5B)
 
 
 class Decision(SQLModel, table=True):

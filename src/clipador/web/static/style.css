@@ -326,3 +326,26 @@ kbd { font-family: ui-monospace, Consolas, monospace; font-size: .8em; padding: 
   .source-status { justify-items: start; text-align: left; }
   .actions { white-space: normal; text-align: left; }
 }
+
+/* --- step 5B: caption editor, pre-publish checks, calibration --- */
+.cap-editor .cap-head { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: baseline; }
+.cap-editor .cap-head h3 { margin: 0; }
+.cap-words { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0; max-height: 14rem; overflow-y: auto; }
+.cap-w { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+.cap-w .cap-t { background: none; border: 0; color: var(--text); padding: .15rem .4rem; cursor: text; font: inherit; }
+.cap-w .cap-mini { background: none; border: 0; color: var(--muted); padding: 0 .25rem; cursor: pointer; font-size: .8rem; opacity: .35; }
+.cap-w:hover .cap-mini, .cap-w:focus-within .cap-mini, .cap-w.edited .cap-mini { opacity: 1; }
+.cap-w.now { border-color: #ffe000; box-shadow: 0 0 0 1px #ffe000 inset; }
+.cap-w.edited { border-color: var(--accent); }
+.cap-w.edited .cap-t { color: #cbbcff; }
+.cap-w.gloss .cap-t { color: #9fe0b8; }
+.cap-w.hidden-word .cap-t { text-decoration: line-through; color: var(--muted); }
+.cap-w.stale { border-style: dashed; border-color: var(--warn); }
+.cap-w .cap-input { width: 9rem; padding: .1rem .3rem; }
+.checks-card .check { display: block; margin: .25rem 0; }
+.badge.ready { color: var(--ok); border-color: var(--ok); font-weight: 600; }
+.glossary-table td { padding: .15rem .4rem; vertical-align: middle; }
+.glossary-table input { width: 100%; }
+.calib table { border-collapse: collapse; }
+.calib td, .calib th { padding: .1rem .5rem; text-align: right; }
+.calib td:first-child, .calib th:first-child { text-align: left; }

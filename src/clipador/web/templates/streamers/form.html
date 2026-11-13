@@ -165,5 +165,40 @@
     <button class="btn">+ Adicionar canal</button>
   </form>
 </section>
+
+<section class="card" id="glossario">
+  <h2>Glossário da legenda</h2>
+  <p class="small muted">Correções aplicadas automaticamente em todas as legendas deste streamer (prévia ao vivo, render e transcrições futuras), <strong>antes</strong> das correções feitas clip a clip. Compara a palavra inteira, sem diferenciar maiúsculas, acentos nem a pontuação colada nela (a pontuação original é mantida). A transcrição salva nunca é alterada. Você também adiciona entradas no editor de legenda da revisão (“sempre corrigir assim neste streamer”).</p>
+  {% if streamer.glossary %}
+  <table class="glossary-table small">
+    <tr><th>Transcrito como</th><th>Vira</th><th></th></tr>
+    {% for wrong, right in streamer.glossary.items() %}
+    <tr>
+      <td colspan="2">
+        <form method="post" action="/streamers/{{ streamer.id }}/glossario" class="inline-form">
+          <input type="hidden" name="antigo" value="{{ wrong }}">
+          <input name="errado" value="{{ wrong }}" aria-label="palavra transcrita">
+          <span>→</span>
+          <input name="certo" value="{{ right }}" aria-label="correção">
+          <button class="btn small">Salvar</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/streamers/{{ streamer.id }}/glossario/remover" class="inline">
+          <input type="hidden" name="errado" value="{{ wrong }}">
+          <button class="btn small danger" title="Remover entrada">Remover</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted small">Nenhuma entrada ainda.</p>{% endif %}
+  <form method="post" action="/streamers/{{ streamer.id }}/glossario" class="inline-form">
+    <input name="errado" placeholder="como a transcrição escreve (ex.: jão)" required>
+    <span>→</span>
+    <input name="certo" placeholder="como deve aparecer (ex.: João)" required>
+    <button class="btn">+ Adicionar</button>
+  </form>
+</section>
 {% endif %}
 {% endblock %}

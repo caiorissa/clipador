@@ -22,10 +22,12 @@ from clipador.models import (
     PENDING_STATUSES,
     RENDERABLE_STATUSES,
     Candidate,
+    CandidateEnrichment,
     CandidateFeedback,
     CandidateStatus,
     Decision,
     DecisionAction,
+    EnrichStatus,
     Job,
     JobStatus,
     Render,
@@ -87,6 +89,27 @@ PREFETCH_PRIORITY = -10
 
 def can_transition(current: str, target: str) -> bool:
     return target in TRANSITIONS.get(current, set())
+
+
+# --- pre-publish checks (5B) -------------------------------------------------------------------
+
+CHECK_KEYS = ("musica_conferida", "alertas_reconhecidos")
+
+
+def has_alerts(e: CandidateEnrichment | None) -> bool:
+    return bool(e and e.status == EnrichStatus.OK and e.alertas)
+
+
+def ready_to_publish(c: Candidate, has_alerts: bool) -> bool:
+    """Approved (or already rendered) AND background music checked AND — only when the AI
+    raised alerts — the alerts read. Approving is never blocked by this; only the badge and
+    the 'prontos' filter depend on it."""
+    ck = c.checks or {}
+    return (
+        c.status in RENDERABLE_STATUSES
+        and bool(ck.get("musica_conferida"))
+        and (not has_alerts or bool(ck.get("alertas_reconhecidos")))
+    )
 
 
 # --- state snapshots ---------------------------------------------------------------------------

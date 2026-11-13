@@ -26,8 +26,8 @@ from clipador.models import (
 )
 from clipador.render import filters
 from clipador.render.styles import get_style, load_styles
-from clipador.render.subtitles import apply_overrides, credit_overlay, words_in_window
-from clipador.services import analysis, rendering, review, waveform
+from clipador.render.subtitles import credit_overlay
+from clipador.services import analysis, captions, rendering, review, waveform
 from clipador.services.review import REJECT_REASONS, ReviewFilters
 from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
@@ -295,14 +295,61 @@ def words_json(
     a = (start if start is not None else c.eff_start) - max(0.0, min(pad, 300.0))
     b = (end if end is not None else c.eff_end) + max(0.0, min(pad, 300.0))
     a = max(0.0, a)
+    return JSONResponse(_words_payload(session, settings, c, a, b))
+
+
+def _words_payload(session: Session, settings: Settings, c: Candidate, a: float, b: float) -> dict:
     words = rendering.transcript_words(session.get_bind(), settings, c.source_id)
-    shown = apply_overrides(words_in_window(words, a, b), c.caption_overrides)
     _src, st = _streamer(session, c)
-    return JSONResponse({
+    glossary = st.glossary if st else None
+    shown, stale = captions.shown_words(words, c, glossary, a, b)
+    rows, _ = captions.editor_words(words, c, glossary, a, b)
+    return {
         "start": round(a, 3), "end": round(b, 3), "style": _style_key(settings, c, st),
         "words": [{"i": w.idx, "s": round(a + w.start, 3), "e": round(a + w.end, 3), "t": w.text}
                   for w in shown],
-    })  # fmt: skip
+        "editor": [r.as_json() for r in rows],
+        "stale": [asdict(s) for s in stale],
+        "streamer": st.display_name if st else None,
+    }  # fmt: skip
+
+
+@router.post("/candidatos/{candidate_id}/legenda/palavra")
+async def edit_caption_word(
+    request: Request, candidate_id: int, session: SessionDep, settings: SettingsDep
+):
+    """JSON: correct / hide / un-correct one word (timing stays the transcript's); optionally
+    also add the correction to the streamer glossary."""
+    c = _candidate(session, candidate_id)
+    form = await request.form()
+    try:
+        idx = int(str(form.get("i", "")))
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Palavra inválida."}, status_code=422)
+    try:
+        msg = captions.edit_word(
+            session, settings, c, idx, str(form.get("text", "")),
+            hide=form.get("hide") == "1", undo=form.get("undo") == "1",
+            to_glossary=form.get("glossary") in ("1", "on"),
+        )  # fmt: skip
+        session.add(c)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return JSONResponse({"ok": False, "error": e.message}, status_code=422)
+    return JSONResponse({"ok": True, "message": msg})
+
+
+@router.post("/candidatos/{candidate_id}/legenda/obsoletas/remover")
+async def remove_stale_captions(
+    request: Request, candidate_id: int, session: SessionDep, settings: SettingsDep
+):
+    c = _candidate(session, candidate_id)
+    raw = str((await request.form()).get("i", "")).strip()
+    n = captions.remove_stale(session, settings, c, int(raw) if raw.isdigit() else None)
+    session.add(c)
+    session.commit()
+    return JSONResponse({"ok": True, "removed": n})
 
 
 @router.get("/fontes/{source_id}/forma-de-onda.json")

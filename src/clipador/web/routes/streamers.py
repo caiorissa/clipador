@@ -13,6 +13,7 @@ from clipador.errors import ValidationError
 from clipador.models import Layout, Platform, Source, SourceStatus, Streamer, StreamerChannel
 from clipador.render.styles import load_styles
 from clipador.services import ffmpeg
+from clipador.services.captions import add_glossary_entry, remove_glossary_entry
 from clipador.services.sources import add_channel, suggest_credit, touch
 from clipador.web.deps import get_session, redirect, render
 
@@ -130,6 +131,7 @@ async def create_streamer(request: Request, session: SessionDep):
     )
 
 
+@router.get("/streamers/{streamer_id}")
 @router.get("/streamers/{streamer_id}/editar")
 def edit_streamer(request: Request, streamer_id: int, session: SessionDep):
     streamer = _get_streamer(session, streamer_id)
@@ -203,6 +205,36 @@ def remove_channel(streamer_id: int, channel_id: int, session: SessionDep):
     session.delete(ch)
     session.commit()
     return redirect(f"/streamers/{streamer_id}/editar", f"Canal {ch.channel_handle} removido.")
+
+
+@router.post("/streamers/{streamer_id}/glossario")
+async def save_glossary_entry(request: Request, streamer_id: int, session: SessionDep):
+    """Add an entry, or edit one (`antigo` = the entry's current 'wrong' word)."""
+    streamer = _get_streamer(session, streamer_id)
+    form = await request.form()
+    old = str(form.get("antigo", "")).strip() or None
+    try:
+        key = add_glossary_entry(
+            streamer, str(form.get("errado", "")), str(form.get("certo", "")), old
+        )
+        session.add(streamer)
+        session.commit()
+    except ValidationError as e:
+        session.rollback()
+        return redirect(f"/streamers/{streamer_id}", e.message)
+    verb = "atualizada" if old else "adicionada"
+    return redirect(f"/streamers/{streamer_id}", f"Entrada “{key}” {verb} no glossário.")
+
+
+@router.post("/streamers/{streamer_id}/glossario/remover")
+async def remove_glossary(request: Request, streamer_id: int, session: SessionDep):
+    streamer = _get_streamer(session, streamer_id)
+    wrong = str((await request.form()).get("errado", ""))
+    removed = remove_glossary_entry(streamer, wrong)
+    session.add(streamer)
+    session.commit()
+    msg = f"Entrada “{wrong}” removida." if removed else "Entrada não encontrada."
+    return redirect(f"/streamers/{streamer_id}", msg)
 
 
 @router.get("/streamers/{streamer_id}/frame.jpg")

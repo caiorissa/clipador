@@ -180,6 +180,7 @@
     // stop at the end (only while playing: re-seeking a paused video would loop via 'seeked')
     if (!video.paused && video.currentTime >= st.end) { video.pause(); video.currentTime = st.end; }
     draw(); updateOverlays();
+    if (editor) editor.tick();
     readout.textContent = fmt(video.currentTime - st.start) + " / " + fmt(st.end - st.start);
     drawTimeline();
     if (!video.paused) requestAnimationFrame(frame);
@@ -208,6 +209,7 @@
     document.getElementById("dur-readout").textContent = len.toFixed(1) + " s";
     rangeStatus.textContent = len > cfg.max_s ? "longo demais (máx. " + cfg.max_s + " s)" : (len < cfg.min_s ? "curto demais" : "");
     buildEvents();
+    if (editor && !editorEl.querySelector(".cap-input")) editor.render();  // list follows the cut
     if (opts.seek !== false && (video.currentTime < st.start || video.currentTime > st.end)) video.currentTime = st.start;
     else frame();
     ensureWaveWindow();
@@ -286,7 +288,17 @@
     const nearEnd = st.end > wave.w1 - 5 && (!cfg.duration || wave.w1 < cfg.duration);
     if (empty || nearStart || nearEnd) loadWave(st.start, st.end);
   }
+  // caption editor (static/caption_editor.js): it loads palavras.json and hands the words to
+  // the live preview; every saved correction re-renders the captions at once
+  const editorEl = document.getElementById("caption-editor");
+  const editor = editorEl && window.CaptionEditor ? window.CaptionEditor.mount(editorEl, {
+    candidate: cfg.candidate, pad: 90,
+    getTime: () => video.currentTime, getRange: () => [st.start, st.end],
+    onData: (d) => { st.words = (d.words || []).map((w) => ({ s: w.s, e: w.e, t: w.t, i: w.i })); buildEvents(); frame(); },
+    onChange: () => refreshFaithful(),
+  }) : null;
   function loadWords() {
+    if (editor) { editor.reload(); return; }
     fetch("/candidatos/" + cfg.candidate + "/palavras.json?pad=90").then((r) => r.json()).then((d) => {
       st.words = (d.words || []).map((w) => ({ s: w.s, e: w.e, t: w.t, i: w.i }));
       buildEvents(); frame();
@@ -407,6 +419,7 @@
     ",": () => nudge("end", -0.5), "<": () => nudge("end", -2),
     ".": () => nudge("end", 0.5), ">": () => nudge("end", 2),
     "l": cycleLayout, "p": requestFaithful, "?": toggleHelp,
+    "e": () => { if (editor) editor.focus(); },
     "backspace": () => { const a = document.querySelector('[data-shortcut="anterior"]'); if (a) location.href = a.href; },
   };
   document.addEventListener("keydown", (ev) => {

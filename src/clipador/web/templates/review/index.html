@@ -105,6 +105,8 @@
       <div class="small warn-text" id="range-warnings"></div>
     </div>
 
+    <div class="card" id="caption-editor" data-shortcut="e"></div>
+
     <div class="card decide">
       <form method="post" action="/revisao/{{ c.id }}/decisao" id="decision-form">
         {{ keep_filters() }}
@@ -152,6 +154,7 @@
       <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>fim −/+ 0,5 s (<kbd>Shift</kbd> = 2 s)</td></tr>
       <tr><td><kbd>L</kbd></td><td>alternar o layout</td></tr>
       <tr><td><kbd>P</kbd></td><td>gerar a prévia fiel (render real)</td></tr>
+      <tr><td><kbd>E</kbd></td><td>ir para o editor de legenda (palavra tocando agora); <kbd>Enter</kbd> edita/salva, <kbd>Esc</kbd> cancela</td></tr>
       <tr><td><kbd>?</kbd></td><td>mostrar/esconder esta ajuda</td></tr>
     </table>
     <p class="small muted">Os atalhos não funcionam enquanto você digita num campo de texto (Esc sai do campo).</p>
@@ -162,5 +165,6 @@
 <style>
 @font-face { font-family: "ClipCaption"; src: url("/revisao/fonte.ttf"); }
 </style>
+<script src="/static/caption_editor.js" defer></script>
 <script src="/static/review.js" defer></script>
 {% endblock %}
