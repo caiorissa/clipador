@@ -109,7 +109,12 @@ def cmd_eval(settings: Settings, args) -> int:
         settings = settings.model_copy(update={"eval_tolerance_seconds": args.tolerance})
     try:
         _res, text = run_eval(
-            _engine(settings), settings, args.source_id, Path(args.golden), args.run
+            _engine(settings),
+            settings,
+            args.source_id,
+            Path(args.golden),
+            args.run,
+            with_llm=args.with_llm,
         )
     except ClipadorError as e:
         print(e.message, file=sys.stderr)
@@ -182,6 +187,31 @@ def cmd_bench_transcribe(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_llm_bench(settings: Settings, args) -> int:
+    from clipador.llm.client import LLMUnavailable
+    from clipador.services import llmbench
+
+    models = [m.strip() for m in (args.models or settings.llm_model).split(",") if m.strip()]
+    try:
+        if args.source:
+            contexts = llmbench.contexts_from_source(
+                _engine(settings), settings, args.source, args.n
+            )
+        else:
+            contexts = llmbench.sample_contexts(args.n, settings.default_game)
+            print(f"Sem --source: usando {args.n} trechos de exemplo embutidos.")
+        results = llmbench.run_bench(settings, contexts, models)
+    except LLMUnavailable as e:
+        print(f"{e.message} {e.hint}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print()
+    print(llmbench.format_results(results, len(contexts)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_stdout()
     parser = argparse.ArgumentParser(prog="clipador", description="Clipador: VODs -> clips 9:16")
@@ -202,6 +232,11 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--golden", required=True, help="arquivo com um HH:MM:SS por linha")
     ev.add_argument("--run", type=int, help="id da análise (padrão: a mais recente)")
     ev.add_argument("--tolerance", type=float, help="folga em segundos (padrão 2)")
+    ev.add_argument("--with-llm", action="store_true", help="compara com a reordenação da IA")
+    lb = sub.add_parser("llm-bench", help="mede velocidade/JSON/VRAM de modelos do Ollama")
+    lb.add_argument("--source", type=int, help="fonte analisada para amostrar candidatos")
+    lb.add_argument("--n", type=int, default=20)
+    lb.add_argument("--models", help="lista separada por vírgula (padrão: o configurado)")
     b = sub.add_parser("bench-transcribe", help="mede a velocidade do Whisper neste PC")
     b.add_argument("audio", help="vídeo ou áudio (ex.: data/vods/1/video.mp4)")
     b.add_argument("--seconds", type=float, default=600, help="quanto do início usar (padrão 600)")
@@ -211,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.command == "llm-bench":
+        return cmd_llm_bench(settings, args)
     if args.command == "bench-transcribe":
         return cmd_bench_transcribe(settings, args)
     if args.command == "dump":

@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-import httpx
-
 from clipador.config import Settings
 from clipador.services import ffmpeg
 from clipador.services.downloader import YtDlp
@@ -192,21 +190,50 @@ def check_disk(settings: Settings) -> CheckResult:
     return CheckResult("Espaço em disco", CheckStatus.OK, detail)
 
 
-def check_ollama(settings: Settings) -> CheckResult:
-    url = settings.ollama_url.rstrip("/")
-    try:
-        res = httpx.get(f"{url}/api/tags", timeout=2.0)
-        res.raise_for_status()
-        models = [m.get("name", "?") for m in res.json().get("models", [])]
-    except (httpx.HTTPError, ValueError) as e:
-        return CheckResult(
+def check_ollama(settings: Settings) -> list[CheckResult]:
+    """Reachable? configured model installed? quick generation latency."""
+    from clipador.llm.client import LLMError, make_llm_client, ollama_status
+
+    st = ollama_status(settings)
+    if not st.ok:
+        return [
+            CheckResult(
+                "Ollama",
+                CheckStatus.WARN,
+                f"{st.message} A IA local é opcional: sem ela o app usa só a nota de detecção.",
+                st.hint,
+            )
+        ]
+    out = [
+        CheckResult(
             "Ollama",
-            CheckStatus.WARN,
-            f"não acessível em {url} ({type(e).__name__}). Opcional por enquanto.",
-            "Será usado a partir do dia 3. Instale em https://ollama.com/download.",
+            CheckStatus.OK,
+            f"acessível em {settings.llm_base_url}; modelos: {', '.join(st.models) or 'nenhum'}",
         )
-    detail = f"acessível em {url}; modelos: {', '.join(models) if models else 'nenhum ainda'}"
-    return CheckResult("Ollama", CheckStatus.OK, detail)
+    ]
+    if not st.configured_installed:
+        out.append(CheckResult("Modelo da IA", CheckStatus.WARN, st.message, st.hint))
+        return out
+    client = make_llm_client(settings)
+    try:
+        resp = client.chat(
+            settings.llm_model, [{"role": "user", "content": "Responda apenas: ok"}],
+            schema=None, temperature=0, num_ctx=512, keep_alive=0, timeout=180, num_predict=5,
+        )  # fmt: skip
+    except LLMError as e:
+        hint = f"Veja os logs do Ollama; tente `ollama run {settings.llm_model}`."
+        fail = CheckResult("Modelo da IA", CheckStatus.FAIL, f"geração de teste falhou: {e}", hint)
+        return [*out, fail]
+    speed = f" · {resp.output_tokens_per_s:.0f} tokens/s" if resp.output_tokens_per_s else ""
+    out.append(
+        CheckResult(
+            "Modelo da IA",
+            CheckStatus.OK,
+            f"{settings.llm_model}: geração de teste em {resp.latency_ms / 1000:.1f}s "
+            f"(inclui carregar o modelo){speed}",
+        )
+    )
+    return out
 
 
 def check_faster_whisper() -> CheckResult:
@@ -331,5 +358,5 @@ def run_all(settings: Settings) -> list[CheckResult]:
         check_models_dir(settings),
         check_twitch_downloader(settings),
         check_disk(settings),
-        check_ollama(settings),
+        *check_ollama(settings),
     ]

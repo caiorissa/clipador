@@ -26,8 +26,8 @@ def test_nvenc_unavailable_is_warning(settings):
 
 def test_ollama_offline_is_only_a_warning(settings):
     with mock.patch("httpx.get", side_effect=httpx.ConnectError("refused")):
-        r = doctor.check_ollama(settings)
-    assert r.status == CheckStatus.WARN
+        (r,) = doctor.check_ollama(settings)
+    assert r.status == CheckStatus.WARN and "opcional" in r.detail
 
 
 def test_ytdlp_version_shown_with_update_hint(settings):
