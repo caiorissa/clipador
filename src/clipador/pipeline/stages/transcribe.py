@@ -19,6 +19,7 @@ from clipador.pipeline.stages.extract_audio import audio_params_hash, load_sourc
 from clipador.services import transcriber as tx
 from clipador.services.artifacts import params_hash, save_artifact, valid_artifact
 from clipador.services.audio import WavReader
+from clipador.services.gpu import vram_used_mb
 
 STAGE = "transcribe"
 VERSION = 1
@@ -134,6 +135,9 @@ class TranscribeStage(Stage):
         finally:
             if transcriber is not None and hasattr(transcriber, "close"):
                 transcriber.close()
+                vram = vram_used_mb()
+                if vram is not None:
+                    ctx.log(f"Whisper descarregado; VRAM em uso agora: {vram} MiB.")
 
         parts = []
         for c in chunks:

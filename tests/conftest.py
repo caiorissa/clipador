@@ -14,6 +14,14 @@ HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is n
 requires_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg/ffprobe não instalados")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_ollama(monkeypatch):
+    """Tests never talk to a real Ollama: by default the LLM looks offline."""
+    from tests.fake_llm import OfflineLLM
+
+    monkeypatch.setattr("clipador.llm.client.make_llm_client", lambda settings: OfflineLLM())
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(data_dir=tmp_path / "data", _env_file=None)

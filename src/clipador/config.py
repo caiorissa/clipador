@@ -62,6 +62,27 @@ class Settings(BaseSettings):
     # TwitchDownloaderCLI executable (https://github.com/lay295/TwitchDownloader/releases).
     twitch_downloader_path: str = "TwitchDownloaderCLI"
 
+    # --- local LLM (Ollama) ---
+    llm_host: str = ""  # empty = ollama_url
+    # ~7-8B instruct, quantized (fits 8 GB with room for context). Alternatives: llama3.1:8b,
+    # qwen3:8b, gemma3:12b (tight). Compare with `clipador llm-bench`.
+    llm_model: str = "qwen2.5:7b"
+    llm_temperature: float = 0.2
+    llm_num_ctx: int = 6144
+    llm_timeout_seconds: float = 120.0
+    llm_keep_alive: str = "2m"  # between calls; the model is unloaded (0) at the end of the stage
+    target_clips: int = 5  # clips you want per source; enrich looks at K = 3x this
+    llm_max_candidates: int = 30
+    default_game: str = "GTA 6"
+    prompts_dir: Path | None = None  # default: <project>/prompts
+    enrich_prompt: str = "enrich_v1"  # prompts/<name>.md
+    # final score = w_detect * detection + w_llm * llm (both 0-100), minus penalties
+    rank_weight_detect: float = 0.5
+    rank_weight_llm: float = 0.5
+    rank_penalty_needs_context: float = 8.0
+    rank_penalty_low_standalone: float = 6.0
+    rank_low_standalone_threshold: int = 4
+
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
     # Tolerance (s) when checking if a golden moment falls inside a candidate (clipador eval).
@@ -131,6 +152,21 @@ class Settings(BaseSettings):
     @property
     def hype_words_path(self) -> Path:
         return self.data_dir / "hype_words.toml"
+
+    @property
+    def llm_base_url(self) -> str:
+        return (self.llm_host or self.ollama_url).rstrip("/")
+
+    @property
+    def prompts_path(self) -> Path:
+        if self.prompts_dir:
+            return self.prompts_dir
+        repo = Path(__file__).resolve().parents[2] / "prompts"  # src/clipador/config.py -> repo
+        return repo if repo.is_dir() else PROJECT_ROOT / "prompts"
+
+    @property
+    def enrich_k(self) -> int:
+        return max(1, min(self.llm_max_candidates, 3 * self.target_clips))
 
     def source_work_dir(self, source_id: int) -> Path:
         return self.work_dir / str(source_id)

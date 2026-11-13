@@ -155,7 +155,9 @@ def test_full_chain_produces_candidates_and_skips_chat(asettings, engine, fake_t
         arts = {a.stage: a for a in s.exec(select(StageArtifact)).all()}
         run = s.exec(select(AnalysisRun)).one()
         cands = s.exec(select(Candidate).order_by(Candidate.rank)).all()
-    assert [jobs[k].status for k in analysis.ANALYSIS_CHAIN] == [JobStatus.DONE] * 4
+    assert [jobs[k].status for k in analysis.ANALYSIS_CHAIN] == [JobStatus.DONE] * len(
+        analysis.ANALYSIS_CHAIN
+    )
     assert arts["fetch_chat"].status == ArtifactStatus.SKIPPED
     assert "TwitchDownloaderCLI" in arts["fetch_chat"].message
     assert arts["transcribe"].summary["words"] == len(SPOKEN)  # no duplicates at chunk seams

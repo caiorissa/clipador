@@ -39,6 +39,7 @@ JOB_TYPE_LABELS = {
     "render": "Renderização",
     "extract_audio": "Extrair áudio",
     "fetch_chat": "Chat",
+    "enrich": "IA (Ollama)",
 }
 KIND_LABELS = {SourceKind.VOD: "VOD", SourceKind.CLIP: "Clip"}
 

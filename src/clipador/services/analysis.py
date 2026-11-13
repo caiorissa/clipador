@@ -25,12 +25,13 @@ from clipador.models import (
 )
 from clipador.worker import queue
 
-ANALYSIS_CHAIN = ["extract_audio", "transcribe", "fetch_chat", "detect"]
+ANALYSIS_CHAIN = ["extract_audio", "transcribe", "fetch_chat", "detect", "enrich"]
 STAGE_LABELS = {
     "extract_audio": "Extrair áudio",
     "transcribe": "Transcrever",
     "fetch_chat": "Chat",
     "detect": "Detectar",
+    "enrich": "IA (Ollama)",
 }
 
 
@@ -58,6 +59,30 @@ def reanalyze(session: Session, source_id: int, params: DetectParams) -> Job:
     if has_transcript is None:
         raise ValidationError("Analise a fonte primeiro (botão Analisar).")
     return queue.enqueue(session, "detect", source_id, {"detect_params": params.model_dump()})
+
+
+def enqueue_enrich(
+    session: Session,
+    source_id: int,
+    *,
+    model: str | None = None,
+    k: int | None = None,
+    candidate_ids: list[int] | None = None,
+    instruction: str = "",
+    overwrite_edited: bool = False,
+) -> Job:
+    if not runs_for(session, source_id):
+        raise ValidationError("Analise a fonte antes de enriquecer com IA.")
+    payload: dict[str, Any] = {}
+    if model:
+        payload["model"] = model
+    if k:
+        payload["k"] = int(k)
+    if candidate_ids:
+        payload["candidate_ids"] = candidate_ids
+        payload["instruction"] = " ".join(instruction.split())[:200]
+        payload["overwrite_edited"] = overwrite_edited
+    return queue.enqueue(session, "enrich", source_id, payload)
 
 
 def stage_overview(session: Session, source_id: int) -> list[dict[str, Any]]:

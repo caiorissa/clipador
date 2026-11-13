@@ -119,6 +119,7 @@ class Source(SQLModel, table=True):
     # Optional range to analyze (seconds). The file is NOT cut; later stages honor it.
     start_offset: float | None = None
     end_offset: float | None = None
+    game: str | None = None  # e.g. "GTA 6" (None = settings.default_game); used by the LLM
     # Non-blocking notice (e.g. channel does not match the streamer's registered channels).
     warning: str | None = None
     error: str | None = None
@@ -215,6 +216,9 @@ class Candidate(SQLModel, table=True):
     status: str = Field(default=CandidateStatus.SUGGESTED)
     user_start: float | None = None
     user_end: float | None = None
+    # Detection score combined with the LLM score (step 3); None until ranked.
+    final_score: float | None = None
+    final_rank: int | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -239,5 +243,66 @@ class CandidateFeedback(SQLModel, table=True):
     candidate_id: int = Field(foreign_key="candidate.id", unique=True)
     verdict: str
     note: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# --- LLM enrichment (step 3) -----------------------------------------------------------------
+
+
+class EnrichStatus(StrEnum):
+    OK = "ok"
+    LLM_FAILED = "llm_failed"
+    SKIPPED = "skipped"
+
+
+class CandidateEnrichment(SQLModel, table=True):
+    """LLM judgement + texts for one candidate (latest wins; `input_hash` is the cache key)."""
+
+    __tablename__ = "candidate_enrichment"
+
+    id: int | None = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="candidate.id", unique=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    prompt_version: str
+    model: str
+    input_hash: str = Field(index=True)
+    instruction: str = ""
+    scores: dict[str, float] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    motivo: str = ""
+    precisa_de_contexto: bool = False
+    alertas: list[dict[str, str]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    titulos: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    texto_de_abertura: str | None = None
+    descricao: str = ""
+    hashtags: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    status: str = Field(default=EnrichStatus.OK)
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    latency_ms: int | None = None
+    tokens: int | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def nota_geral(self) -> float | None:
+        if self.status != EnrichStatus.OK:
+            return None
+        v = self.scores.get("nota_geral")
+        return float(v) if v is not None else None
+
+
+class PostDraft(SQLModel, table=True):
+    __tablename__ = "post_draft"
+    __table_args__ = (UniqueConstraint("candidate_id", "platform", name="uq_draft_platform"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="candidate.id", index=True)
+    platform: str  # youtube | tiktok | instagram
+    title: str = ""
+    description: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
+    hashtags: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    edited_by_user: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
