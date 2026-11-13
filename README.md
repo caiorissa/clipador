@@ -16,6 +16,8 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
   e calibração com `clipador dump` / `clipador eval`.
 - Passo 5A (revisão): tela `/revisao` com fila global, atalhos de teclado, prévia ao vivo,
   ajuste do corte na forma de onda e histórico com desfazer.
+- Passo 5B: editor de legenda palavra a palavra, glossário por streamer, verificações antes de
+  publicar ("pronto para publicar") e calibração dos pesos com `clipador calibrate`.
 
 ## Detecção de momentos (Passo 2)
 
@@ -187,9 +189,53 @@ análise mais recente de cada fonte), para decidir quase só com o teclado:
 | `,` / `.` | fim −/+ 0,5 s (`Shift` = 2 s) |
 | `L` | alternar o layout |
 | `P` | gerar a prévia fiel |
+| `E` | ir para o editor de legenda (Passo 5B) |
 | `?` | ajuda dos atalhos |
 
 Os atalhos não disparam enquanto você digita num campo (a nota, por exemplo); `Esc` sai do campo.
+
+## Revisão (Passo 5B)
+
+- **Editor de legenda (palavra a palavra):** na `/revisao` (tecla `E`) e no card do candidato
+  na página da fonte ("Corrigir a legenda palavra a palavra"). Lista as palavras do trecho com o
+  tempo; a que está tocando fica destacada. Clique numa palavra para corrigir (`Enter` salva,
+  `Esc` cancela) — **o tempo é sempre o da transcrição**; ⦸ oculta a palavra; ↶ desfaz a
+  correção. A prévia ao vivo atualiza na hora e a prévia fiel/render final passam a usar o texto
+  novo (o cache do render é invalidado só para o clip mudado).
+- **Correções robustas:** cada correção guarda o texto original da palavra. Se a transcrição for
+  regerada e a palavra naquela posição não for mais a mesma, a correção fica **obsoleta**: não é
+  aplicada e aparece um aviso no editor (e no card) com o botão "Remover obsoletas". Correções
+  feitas antes do 5B (sem original) continuam valendo.
+- **Glossário por streamer:** marque **"sempre corrigir assim neste streamer"** ao corrigir, ou
+  edite a lista em `/streamers/{id}` (seção "Glossário da legenda"). Troca a palavra inteira,
+  sem diferenciar maiúsculas, acentos nem a pontuação colada (que é mantida: `polícia!` →
+  `viatura!`). Vale para a prévia ao vivo, o `.ass` do render e as transcrições futuras, sempre
+  **antes** das correções clip a clip, e **nunca altera a transcrição salva**. Mudar o glossário
+  só invalida os renders cuja legenda muda de fato.
+- **Antes de publicar:** na `/revisao`, as caixas **"Conferi música/copyright de fundo"** e
+  **"Li os alertas da IA"** (esta só quando a IA levantou alertas), com um aviso fixo: a IA **não
+  detecta música com direitos autorais**. Aprovar nunca é bloqueado; só o selo **"pronto para
+  publicar"** (aprovado + caixas marcadas) e os filtros **"Prontos"** (status da fila e
+  "Mostrar" na página da fonte) dependem delas. Marcar/desmarcar entra no histórico (`Z` desfaz).
+- **Calibração a partir das suas decisões:** aprovados = positivos, rejeitados = negativos
+  (pulados e sugeridos ficam de fora). Uma regressão logística simples (L2, features
+  padronizadas, validação cruzada estratificada 5-fold com semente fixa) sugere pesos não
+  negativos para os sinais da curva de interesse e para detecção × IA, e mostra **AUC e
+  precisão@N antes/depois** sobre os seus vereditos. Com menos de ~50 revisados ou menos de ~10
+  de uma das classes, avisa e **não sugere aplicar**.
+
+  ```powershell
+  uv run clipador calibrate --all          # todas as fontes (padrão)
+  uv run clipador calibrate --source 3     # só uma fonte
+  uv run clipador calibrate --all --json   # saída para scripts
+  ```
+
+  Na página da fonte, o painel "Ajustes da detecção" tem o card **"Pesos sugeridos pela
+  calibração"** (calculado com todas as fontes): **Aplicar como novo preset** salva o preset em
+  `data/presets_calibrados.json` (ele aparece na lista de presets) e roda a reanálise barata
+  (só a detecção, sem retranscrever); **Reverter** reanalisa com os parâmetros de antes. Nada é
+  aplicado automaticamente. O "antes/depois" usa a mesma aproximação linear da nota de detecção
+  (média ponderada do detalhamento por sinal) nos dois lados.
 
 ## Requisitos (Windows 11)
 
