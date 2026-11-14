@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlmodel import Session, col, select
 
-from clipador.errors import ValidationError
-from clipador.models import Layout, Platform, Source, SourceStatus, Streamer, StreamerChannel
+from clipador.errors import ClipadorError, ValidationError
+from clipador.models import Layout, Platform, Streamer, StreamerChannel
 from clipador.render.styles import load_styles
-from clipador.services import ffmpeg
+from clipador.services import facecam, ffmpeg
 from clipador.services.captions import add_glossary_entry, remove_glossary_entry
 from clipador.services.sources import add_channel, suggest_credit, touch
 from clipador.web.deps import get_session, redirect, render
@@ -80,6 +80,10 @@ def _apply_form(streamer: Streamer, form: dict[str, str]) -> None:
     streamer.permission_note = form.get("permission_note", "").strip()
     streamer.credit_text = form.get("credit_text", "").strip()
     streamer.default_layout = layout
+    old_box = [round(float(v), 4) for v in streamer.facecam_box] if streamer.facecam_box else None
+    if box != old_box:  # drawn/typed/cleared by hand: never overwritten by the detector again
+        streamer.facecam_auto = False
+        streamer.facecam_confidence = None
     streamer.facecam_box = box
     streamer.default_caption_style = style or None
     streamer.show_credit = form.get("show_credit") == "on"
@@ -237,17 +241,32 @@ async def remove_glossary(request: Request, streamer_id: int, session: SessionDe
     return redirect(f"/streamers/{streamer_id}", msg)
 
 
+@router.post("/streamers/{streamer_id}/facecam/detectar")
+async def detect_streamer_facecam(request: Request, streamer_id: int, session: SessionDep):
+    """'Detectar de novo': run the detector on the latest downloaded source. A hand-marked box
+    is only replaced when the user confirmed it (`sobrescrever=1`)."""
+    settings = request.app.state.settings
+    _get_streamer(session, streamer_id)
+    overwrite = str((await request.form()).get("sobrescrever", "")) == "1"
+    src = facecam.latest_ready_source(session, streamer_id, settings)
+    url = f"/streamers/{streamer_id}/editar"
+    if src is None:
+        return redirect(url, "Baixe uma fonte deste streamer antes de detectar a facecam.")
+    try:
+        out = facecam.run_detection(session, settings, src, overwrite_manual=overwrite)
+    except ClipadorError as e:
+        session.rollback()
+        return redirect(url, e.message)
+    return redirect(url, out.message)
+
+
 @router.get("/streamers/{streamer_id}/frame.jpg")
 def streamer_frame(request: Request, streamer_id: int, session: SessionDep):
     """A frame from this streamer's latest downloaded source, for drawing the facecam box."""
     settings = request.app.state.settings
     _get_streamer(session, streamer_id)
-    src = session.exec(
-        select(Source)
-        .where(Source.streamer_id == streamer_id, Source.status == SourceStatus.READY)
-        .order_by(col(Source.id).desc())
-    ).first()
-    if src is None or not src.file_path or not settings.abs_path(src.file_path).is_file():
+    src = facecam.latest_ready_source(session, streamer_id, settings)
+    if src is None or not src.file_path:
         raise HTTPException(status_code=404, detail="sem fonte baixada")
     out = settings.tmp_dir / f"streamer_{streamer_id}_src{src.id}.jpg"
     if not out.is_file():

@@ -14,6 +14,7 @@ from clipador.pipeline.base import Stage, StageContext
 from clipador.platforms.registry import get_adapter
 from clipador.services import ffmpeg
 from clipador.services.downloader import THUMB_BASENAME, YtDlp, find_video_file
+from clipador.services.facecam import autodetect_in_stage
 from clipador.services.sources import channel_warning
 from clipador.utils import format_duration, utcnow
 
@@ -148,6 +149,8 @@ class IngestStage(Stage):
             warning=warning,
             error=None,
         )
+        # 6) facecam: fill the streamer's box automatically if it has none (never fails ingest)
+        autodetect_in_stage(ctx)
         ctx.progress(100, "Pronto.")
 
     def on_failure(self, ctx: StageContext, message: str, final: bool) -> None:

@@ -142,6 +142,44 @@ def cmd_calibrate(settings: Settings, args) -> int:
     return 0
 
 
+def cmd_facecam(settings: Settings, args) -> int:
+    """Detect the facecam of a source (id) or of a streamer's latest downloaded source."""
+    from sqlmodel import Session
+
+    from clipador.errors import ClipadorError
+    from clipador.models import Source
+    from clipador.services import facecam
+
+    settings.ensure_dirs()
+    engine = _engine(settings)
+    target = args.target.strip()
+    with Session(engine, expire_on_commit=False) as s:
+        if target.isdigit():
+            src = s.get(Source, int(target))
+            if src is None:
+                print(f"Fonte #{target} não existe.", file=sys.stderr)
+                return 1
+        else:
+            st = facecam.find_streamer(s, target)
+            if st is None:
+                print(f"Streamer “{target}” não encontrado.", file=sys.stderr)
+                return 1
+            src = facecam.latest_ready_source(s, st.id, settings)
+            if src is None:
+                print(f"{st.display_name} ainda não tem nenhuma fonte baixada.", file=sys.stderr)
+                return 1
+        try:
+            out = facecam.run_detection(
+                s, settings, src, overwrite_manual=args.sobrescrever, save=not args.nao_salvar,
+                log_cb=print,
+            )  # fmt: skip
+        except ClipadorError as e:
+            print(e.message, file=sys.stderr)
+            return 1
+        print(facecam.outcome_text(out, src, settings))
+    return 0
+
+
 def cmd_bench_transcribe(settings: Settings, args) -> int:
     """Measure Whisper speed (x real time) and peak VRAM on a WAV/video, without the queue."""
     import shutil
@@ -292,6 +330,11 @@ def main(argv: list[str] | None = None) -> int:
     scope.add_argument("--source", type=int, help="só os candidatos desta fonte")
     scope.add_argument("--all", action="store_true", help="todas as fontes (padrão)")
     cal.add_argument("--json", action="store_true", help="saída em JSON")
+    fc = sub.add_parser("facecam", help="detecta a facecam e salva uma prévia em data/work/")
+    fc.add_argument("target", help="id da fonte ou nome/canal do streamer (usa a última fonte)")
+    fc.add_argument("--sobrescrever", action="store_true",
+                    help="substitui também uma caixa marcada à mão")  # fmt: skip
+    fc.add_argument("--nao-salvar", action="store_true", help="só mostra, não salva no streamer")
     rb = sub.add_parser("render-bench", help="mede a velocidade do render (prévia e final)")
     rb.add_argument("candidate_id", type=int, nargs="?", help="sem id: usa um vídeo de teste")
     rb.add_argument("--encoders", default="nvenc,x264")
@@ -321,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_eval(settings, args)
     if args.command == "calibrate":
         return cmd_calibrate(settings, args)
+    if args.command == "facecam":
+        return cmd_facecam(settings, args)
     if args.command == "doctor":
         return cmd_doctor(settings)
     if args.command == "web":

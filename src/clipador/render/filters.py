@@ -36,7 +36,8 @@ def resolve_layout(wanted: str | None, rect) -> tuple[str, str | None]:
     if layout in NEEDS_FACECAM and not rect:
         return "blur", (
             "Este streamer não tem retângulo de facecam definido: usei 'Fundo borrado'. "
-            "Defina a facecam na página do streamer."
+            "A facecam não foi detectada automaticamente; marque à mão na página do streamer "
+            "se quiser."
         )
     return layout, None
 

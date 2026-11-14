@@ -13,6 +13,7 @@ from clipador.models import Source, SourceStatus
 from clipador.pipeline.base import Stage, StageContext
 from clipador.services import audio
 from clipador.services.artifacts import params_hash, save_artifact, valid_artifact
+from clipador.services.facecam import autodetect_in_stage
 
 STAGE = "extract_audio"
 VERSION = 1
@@ -88,4 +89,7 @@ class ExtractAudioStage(Stage):
             },
             elapsed=time.monotonic() - t_start,
         )
+        # Sources downloaded before step 5C (or whose streamer had its box cleared) get their
+        # facecam detected when analyzed. No-op when the streamer already has a box.
+        autodetect_in_stage(ctx)
         ctx.progress(100, f"Áudio extraído: {reader.duration / 60:.1f} min.")

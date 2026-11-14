@@ -60,6 +60,11 @@ class Streamer(SQLModel, table=True):
     default_caption_style: str | None = None  # key in config/caption_styles.toml
     # Facecam rectangle NORMALIZED to the frame (x, y, w, h in 0..1): valid at any resolution.
     facecam_box: list[float] | None = Field(default=None, sa_column=Column(JSON))
+    # Step 5C: True = the box came from the automatic detector (it may be re-detected); False =
+    # marked by hand, never overwritten automatically. Confidence 0..1 of the last detection
+    # (set with an empty box when the detector found no facecam).
+    facecam_auto: bool = Field(default=False, sa_column_kwargs={"server_default": "0"})
+    facecam_confidence: float | None = None
     show_credit: bool = True  # "via @handle" on screen
     show_opening_text: bool = True
     # Caption glossary {wrong: right}: whole-word, case/accent-insensitive, applied to the

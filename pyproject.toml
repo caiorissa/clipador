@@ -17,6 +17,9 @@ dependencies = [
     "numpy>=2.0",
     "scipy>=1.14",
     "faster-whisper>=1.1",
+    # facecam auto-detection (YuNet / Haar), CPU only. <5: OpenCV 5 dropped CascadeClassifier
+    # (the offline Haar fallback).
+    "opencv-python-headless>=4.10,<5",
     # CUDA runtime libs for ctranslate2 (GPU Whisper) without a system-wide CUDA/cuDNN install.
     "nvidia-cublas-cu12; sys_platform != 'darwin'",
     "nvidia-cudnn-cu12>=9,<10; sys_platform != 'darwin'",

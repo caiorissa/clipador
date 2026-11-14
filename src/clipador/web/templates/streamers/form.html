@@ -80,7 +80,19 @@
     <h3 class="fc-title">Facecam</h3>
     {% set box = (streamer.facecam_box if streamer and streamer.facecam_box else [None, None, None, None]) %}
     {% if streamer %}
-    <p class="small muted">Arraste um retângulo sobre a câmera do streamer. As coordenadas são relativas (0 a 1), então valem para qualquer resolução.</p>
+    {% set fc_manual = streamer.facecam_rect and not streamer.facecam_auto %}
+    {% if streamer.facecam_rect and streamer.facecam_auto %}
+    <p class="small fc-status ok">Detectada automaticamente ({{ ((streamer.facecam_confidence or 0) * 100)|round|int }}% de confiança), ajuste se precisar.</p>
+    {% elif fc_manual %}
+    <p class="small fc-status">Marcada à mão (a detecção automática nunca substitui esta caixa sozinha).</p>
+    {% elif streamer.facecam_confidence is not none %}
+    <p class="small fc-status warn-text">Facecam não detectada, marque à mão se quiser. Sem facecam, os cortes usam um layout sem câmera.</p>
+    {% else %}
+    <p class="small fc-status muted">A facecam é detectada automaticamente quando uma fonte deste streamer é baixada ou analisada.</p>
+    {% endif %}
+    <p class="small muted">Os campos abaixo são ajuste fino opcional; você também pode arrastar um retângulo sobre o quadro. As coordenadas são relativas (0 a 1), então valem para qualquer resolução.</p>
+    <p><button type="submit" class="btn small" formaction="/streamers/{{ streamer.id }}/facecam/detectar" formmethod="post" formnovalidate
+      {% if fc_manual %}name="sobrescrever" value="1" onclick="return confirm('Substituir a facecam marcada à mão pela detecção automática?')"{% endif %}>🔍 Detectar de novo</button></p>
     <div class="fc-tool" id="fc-tool" data-src="/streamers/{{ streamer.id }}/frame.jpg">
       <div class="fc-stage"><img id="fc-img" alt="Quadro de uma fonte do streamer"><div id="fc-rect" class="fc-rect" hidden></div></div>
       <div class="fc-side">

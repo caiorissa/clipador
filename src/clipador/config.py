@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     preview_height: int = 960
     platform_max_seconds: float = 60.0  # warn (don't block) above this
 
+    # --- facecam auto-detection (step 5C) ---
+    facecam_auto_detect: bool = True  # after download/analysis, when the streamer has no box
+    facecam_model_download: bool = True  # fetch YuNet's ONNX to data/models (else Haar)
+    facecam_samples: int = 16  # frames sampled across the video
+    facecam_min_confidence: float = 0.45
+
     # --- review (/revisao) ---
     render_on_approve: bool = True  # approving queues the final render (cached, never twice)
     review_prefetch: int = 3  # faithful previews queued ahead for the next N pending clips
