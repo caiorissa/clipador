@@ -130,3 +130,9 @@ def test_analyze_button_and_unknown_source(analyzed):
     assert r.status_code == 303
     assert analyzed.get("/fontes/999").status_code == 404
     assert analyzed.get("/fontes/tabela").status_code == 200  # static route still wins
+
+
+def test_detail_page_candidate_video_urls_include_source_id(analyzed):
+    html = analyzed.get(f"/fontes/{analyzed.sid}").text
+    assert f'src="/fontes/{analyzed.sid}/video#t=' in html
+    assert "/fontes//video" not in html

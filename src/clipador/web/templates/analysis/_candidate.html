@@ -23,7 +23,7 @@
   <div class="cand-body">
     <video class="clip-player" controls preload="none" playsinline
            data-start="{{ s }}" data-end="{{ en }}"
-           src="/fontes/{{ source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(en) }}"></video>
+           src="/fontes/{{ c.source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(en) }}"></video>
     <div class="cand-info">
       {% include "analysis/_breakdown.html" %}
       <p class="snippet">{{ c.transcript_snippet or '(sem fala transcrita neste trecho)' }}</p>
