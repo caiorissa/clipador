@@ -56,6 +56,19 @@ def _output_of(row: CandidateEnrichment) -> EnrichOutput:
     )
 
 
+def queue_auto_previews(ctx: StageContext, run_id: int) -> None:
+    """End of an analysis: faithful previews of the top N in the background (best effort)."""
+    from clipador.services.previews import auto_previews
+
+    if ctx.settings.auto_preview_top_n <= 0:
+        return
+    with ctx.session() as s:
+        job, n = auto_previews(s, ctx.settings, run_id)
+        s.commit()
+    if job is not None and n:
+        ctx.log(f"Prévias fiéis dos {n} melhores na fila (job #{job.id}, prioridade baixa).")
+
+
 class EnrichStage(Stage):
     name = STAGE
     needs_gpu = True  # Ollama runs on the GPU: never alongside Whisper
@@ -130,6 +143,8 @@ class EnrichStage(Stage):
                 s.commit()
             for note in filter(None, notes):
                 ctx.log(note)
+            if not targets:
+                queue_auto_previews(ctx, run.id)
             save_artifact(ctx.engine, source.id, STAGE, phash, status=ArtifactStatus.SKIPPED,
                           message=reason, elapsed=time.monotonic() - t_start)  # fmt: skip
             ctx.progress(
@@ -241,6 +256,8 @@ class EnrichStage(Stage):
         with ctx.session() as s:
             rerank_run(s, s.get(AnalysisRun, run.id), settings)
             s.commit()
+        if not targets:
+            queue_auto_previews(ctx, run.id)
         called = stats["ok"] + stats["failed"]
         summary = {
             "model": model,

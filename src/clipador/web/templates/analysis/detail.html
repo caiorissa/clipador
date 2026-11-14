@@ -80,6 +80,7 @@
       <div class="render-actions">
         <form method="post" action="/fontes/{{ source.id }}/renderizar-aprovados" class="inline"><input type="hidden" name="run" value="{{ run.id }}"><button class="btn primary" {{ 'disabled' if not approved_count }}>🎬 Renderizar aprovados ({{ approved_count }})</button></form>
         <form method="post" action="/fontes/{{ source.id }}/video-longo" class="inline"><input type="hidden" name="run" value="{{ run.id }}"><button class="btn" {{ 'disabled' if not approved_count }}>🎞 Vídeo longo 16:9</button></form>
+        <form method="post" action="/fontes/{{ source.id }}/previas" class="inline"><input type="hidden" name="run" value="{{ run.id }}"><button class="btn" title="prévia fiel (540×960) de cada candidato que ainda não tem">👁 Gerar prévias de todos</button></form>
         {% if long_art and long_art.files.get('video') %}
           <a class="btn" href="/arquivos/{{ long_art.files.video }}" download>⬇ longo.mp4 ({{ long_art.summary.get('moments') }} momentos)</a>
           <a class="btn" href="/arquivos/{{ long_art.files.chapters }}" target="_blank">📝 Capítulos</a>
@@ -200,7 +201,7 @@
   document.body.addEventListener("click", (ev) => {
     const b = ev.target.closest("[data-nudge],[data-preview]");
     if (!b) return;
-    const card = b.closest(".cand"), form = card.querySelector("form.adjust"), v = card.querySelector("video");
+    const card = b.closest(".cand"), form = card.querySelector("form.adjust"), v = card.querySelector("video.clip-player");
     if (b.dataset.nudge) {
       const input = form.querySelector(b.dataset.nudge === "start" ? "[name=user_start]" : "[name=user_end]");
       input.value = Math.max(0, Number(input.value) + Number(b.dataset.d)).toFixed(2);
@@ -208,7 +209,10 @@
     const s = Number(form.user_start.value), e = Number(form.user_end.value);
     if (!(e > s)) return;
     v.dataset.start = s; v.dataset.end = e;
-    if (b.dataset.preview !== undefined) { v.currentTime = s; v.play(); }
+    if (b.dataset.preview !== undefined) {
+      const box = v.closest("details.orig-player"); if (box) box.open = true;
+      v.currentTime = s; v.play();
+    }
   });
 
   // --- caption editor (static/caption_editor.js), mounted when its <details> opens ---

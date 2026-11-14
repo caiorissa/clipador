@@ -21,9 +21,18 @@
   {% if card_notice %}<div class="flash small">{{ card_notice }}</div>{% endif %}
   {% include "analysis/_alerts.html" %}
   <div class="cand-body">
+    {% set pvd = item.preview if item.preview and item.preview.status == 'done' and item.preview.path else none %}
+    <div class="cand-media">
+    {% if pvd %}
+      <video class="faithful-player" controls preload="none" playsinline src="/arquivos/{{ pvd.path }}" title="prévia fiel (render real 540×960)"></video>
+      <div class="small muted">prévia fiel{% if pvd.params.get('start') is not none and (pvd.params.start != s or pvd.params.end != en) %} · <span class="warn-text">feita com outro corte</span>{% endif %}</div>
+    {% endif %}
+    {% if pvd or item.source_is_live %}<details class="orig-player"><summary class="small">{{ 'trecho original' if pvd else 'trecho original (disponível quando a live terminar)' }}</summary>{% endif %}
     <video class="clip-player" controls preload="none" playsinline
            data-start="{{ s }}" data-end="{{ en }}"
            src="/fontes/{{ c.source_id }}/video#t={{ '%.2f'|format(s) }},{{ '%.2f'|format(en) }}"></video>
+    {% if pvd or item.source_is_live %}</details>{% endif %}
+    </div>
     <div class="cand-info">
       {% include "analysis/_breakdown.html" %}
       <p class="snippet">{{ c.transcript_snippet or '(sem fala transcrita neste trecho)' }}</p>

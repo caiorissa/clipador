@@ -351,3 +351,17 @@ kbd { font-family: ui-monospace, Consolas, monospace; font-size: .8em; padding: 
 .calib table { border-collapse: collapse; }
 .calib td, .calib th { padding: .1rem .5rem; text-align: right; }
 .calib td:first-child, .calib th:first-child { text-align: left; }
+
+/* --- step 5E: faithful preview in the card, live badges, live page --- */
+.cand-media { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.faithful-player { width: 100%; max-height: 420px; aspect-ratio: 9 / 16; background: #000; border-radius: 6px; }
+.orig-player summary { cursor: pointer; color: var(--muted); }
+.badge.live { color: #fff; background: #e5484d; border-color: #e5484d; font-weight: 700; letter-spacing: .03em; }
+.badge.auto { color: var(--warn); border-color: var(--warn); }
+.nav-count { display: inline-block; min-width: 1.2em; margin-left: .25rem; padding: 0 .35rem; border-radius: 999px; background: #e5484d; color: #fff; font-size: .75rem; text-align: center; }
+.nav-count:empty { display: none; }
+.live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .5rem; }
+.live-grid .stat { background: var(--panel-2); border-radius: 6px; padding: .5rem .6rem; }
+.live-grid .stat strong { display: block; font-size: 1.2rem; }
+.dot-live { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: #e5484d; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }

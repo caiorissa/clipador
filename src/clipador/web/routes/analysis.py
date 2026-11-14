@@ -295,10 +295,11 @@ def _card_items(
         if settings is not None and cands
         else []
     )
-    streamer = None
+    streamer = src = None
     if cands:
         src = session.get(Source, cands[0][0].source_id)
         streamer = session.get(Streamer, src.streamer_id) if src else None
+    source_is_live = bool(src and src.is_live and not src.file_path)
     rect = streamer.facecam_rect if streamer else None
     items = []
     for c, fb in cands:
@@ -324,6 +325,7 @@ def _card_items(
                 "layout_warning": resolve_layout(wanted, rect)[1],
                 "options": c.render_options or {},
                 "streamer": streamer,
+                "source_is_live": source_is_live,
             }
         )
     return items
@@ -656,6 +658,30 @@ async def render_approved(request: Request, source_id: int, session: SessionDep)
     if reused:
         msg += f"; {len(reused)} já estavam prontos"
     return redirect(f"/fontes/{source_id}", msg + ".")
+
+
+@router.post("/fontes/{source_id}/previas")
+async def previews_for_all(request: Request, source_id: int, session: SessionDep):
+    """'Gerar prévias de todos': faithful previews of every candidate of the run that has none."""
+    from clipador.services import previews
+
+    settings: Settings = request.app.state.settings
+    _source(session, source_id)
+    form = await request.form()
+    run = _selected_run(session, source_id, int(form["run"]) if form.get("run") else None)
+    if run is None:
+        return redirect(f"/fontes/{source_id}", "Analise a fonte primeiro.")
+    cands = [c for c, _fb in analysis.candidates_for(session, run.id) if c.status != "rejected"]
+    todo = previews.without_preview(session, cands)
+    if not todo:
+        return redirect(f"/fontes/{source_id}", "Todos os candidatos já têm prévia (ou na fila).")
+    if not previews.has_video(session, settings, source_id):
+        return redirect(f"/fontes/{source_id}", "O vídeo desta fonte não está no disco.")
+    job, n = previews.enqueue_previews(session, settings, todo, priority=0)
+    session.commit()
+    if job is None:
+        return redirect(f"/fontes/{source_id}", "As prévias já existem com estes ajustes.")
+    return redirect(f"/fontes/{source_id}", f"{n} prévia(s) na fila (job #{job.id}).")
 
 
 @router.post("/fontes/{source_id}/video-longo")
