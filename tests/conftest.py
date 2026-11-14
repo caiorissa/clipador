@@ -24,7 +24,14 @@ def _no_real_ollama(monkeypatch):
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(data_dir=tmp_path / "data", _env_file=None)
+    # Facecam auto-detection is off by default in tests (it would sample every synthetic video
+    # and try to download the YuNet model); tests/test_facecam.py turns it on with a fake detector.
+    return Settings(
+        data_dir=tmp_path / "data",
+        _env_file=None,
+        facecam_auto_detect=False,
+        facecam_model_download=False,
+    )
 
 
 @pytest.fixture
