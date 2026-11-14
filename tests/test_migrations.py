@@ -95,3 +95,48 @@ def test_0007_caption_editor_upgrade_and_downgrade(settings):
         assert conn.execute(sa.text("SELECT display_name FROM streamer")).scalar_one() == "F"
     eng.dispose()
     command.upgrade(cfg, "head")
+
+
+def test_0009_live_upgrade_and_downgrade(settings):
+    settings.ensure_dirs()
+    cfg = alembic_config(settings)
+    command.upgrade(cfg, "0008")
+    eng = make_engine(settings)
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO streamer (id, display_name, permission_confirmed, permission_note, "
+            "credit_text, default_layout, show_credit, show_opening_text, active, created_at, "
+            "updated_at) VALUES (1, 'F', 1, '', '', 'blur', 1, 1, 1, '2026-11-13 00:00:00', "
+            "'2026-11-13 00:00:00')"
+        ))  # fmt: skip
+        conn.execute(sa.text(
+            "INSERT INTO source (id, streamer_id, platform, kind, external_id, url, status, "
+            "created_at, updated_at) VALUES (1, 1, 'twitch', 'vod', '1', 'u', 'ready', "
+            "'2026-11-13 00:00:00', '2026-11-13 00:00:00')"
+        ))  # fmt: skip
+    eng.dispose()
+    command.upgrade(cfg, "0009")
+    eng = make_engine(settings)
+    names = sa.inspect(eng).get_table_names()
+    assert {"live_session", "live_segment"} <= set(names)
+    assert {"live_session_id", "auto_clipped"} <= _columns(eng, "candidate")
+    with eng.connect() as conn:
+        assert conn.execute(sa.text("SELECT is_live FROM source")).scalar_one() == 0
+        assert conn.execute(sa.text("SELECT auto_watch FROM streamer")).scalar_one() == 0
+    with eng.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO source (id, streamer_id, platform, kind, external_id, url, status, "
+            "is_live, created_at, updated_at) VALUES (2, 1, 'twitch', 'live', 'f@1', 'u2', 'live', "
+            "1, '2026-11-13 00:00:00', '2026-11-13 00:00:00')"
+        ))  # fmt: skip
+    eng.dispose()
+    command.downgrade(cfg, "0008")
+    eng = make_engine(settings)
+    assert "live_session" not in sa.inspect(eng).get_table_names()
+    assert "auto_clipped" not in _columns(eng, "candidate")
+    assert "is_live" not in _columns(eng, "source")
+    with eng.connect() as conn:
+        rows = conn.execute(sa.text("SELECT id, kind, status FROM source ORDER BY id")).all()
+    eng.dispose()
+    assert [tuple(r) for r in rows] == [(1, "vod", "ready"), (2, "vod", "failed")]
+    command.upgrade(cfg, "head")

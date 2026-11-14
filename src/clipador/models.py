@@ -23,6 +23,7 @@ PLATFORM_LABELS = {Platform.TWITCH: "Twitch", Platform.YOUTUBE: "YouTube", Platf
 class SourceKind(StrEnum):
     VOD = "vod"
     CLIP = "clip"
+    LIVE = "live"  # being captured now (step 5E); becomes VOD when the live ends
 
 
 class Layout(StrEnum):
@@ -36,6 +37,7 @@ class SourceStatus(StrEnum):
     DOWNLOADING = "downloading"
     READY = "ready"
     FAILED = "failed"
+    LIVE = "live"  # live capture in progress (no single video file yet)
 
 
 class JobStatus(StrEnum):
@@ -70,6 +72,8 @@ class Streamer(SQLModel, table=True):
     # Caption glossary {wrong: right}: whole-word, case/accent-insensitive, applied to the
     # captions only (the saved transcript is never changed). Step 5B.
     glossary: dict[str, str] | None = Field(default=None, sa_column=Column(JSON))
+    # Step 5E: check every ~2 min if a registered channel went live and start capturing.
+    auto_watch: bool = Field(default=False, sa_column_kwargs={"server_default": "0"})
     active: bool = True
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -132,6 +136,9 @@ class Source(SQLModel, table=True):
     # Non-blocking notice (e.g. channel does not match the streamer's registered channels).
     warning: str | None = None
     error: str | None = None
+    # Step 5E: True while a live is being captured in segments (no file_path yet); when it ends
+    # the segments are joined into one video and the source becomes a normal VOD.
+    is_live: bool = Field(default=False, sa_column_kwargs={"server_default": "0"})
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -250,6 +257,11 @@ class Candidate(SQLModel, table=True):
     # Step 5 (review): when it was approved/rejected/skipped; pre-publish checks (5B).
     reviewed_at: datetime | None = None
     checks: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # Step 5E: found while the live was on (badge "AO VIVO"); auto_clipped = crossed the
+    # session's minimum score, so its faithful preview was queued right away. It is NEVER
+    # approved automatically: the decision stays with the user in /revisao.
+    live_session_id: int | None = Field(default=None, foreign_key="live_session.id", index=True)
+    auto_clipped: bool = Field(default=False, sa_column_kwargs={"server_default": "0"})
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -402,3 +414,80 @@ class Render(SQLModel, table=True):
     loudness_lufs: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# --- Live capture (step 5E) -----------------------------------------------------------------------
+
+
+class LiveStatus(StrEnum):
+    WATCHING = "watching"  # process started, waiting for / connecting to the stream
+    RECORDING = "recording"
+    STOPPED = "stopped"  # ended (live over, user stopped, low disk); final
+    FAILED = "failed"  # gave up (e.g. never managed to connect); final
+
+
+ACTIVE_LIVE_STATUSES = (LiveStatus.WATCHING, LiveStatus.RECORDING)
+
+
+class LiveSession(SQLModel, table=True):
+    """One live being captured in segments by a separate `clipador live-capture` process.
+    Times of everything in a session (segments, candidates) are seconds on the GLOBAL timeline
+    of the capture (sum of the captured segments): reconnecting never resets it."""
+
+    __tablename__ = "live_session"
+
+    id: int | None = Field(default=None, primary_key=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    status: str = Field(default=LiveStatus.WATCHING, index=True)
+    started_at: datetime = Field(default_factory=utcnow)
+    stopped_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    pid: int | None = None
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    warning: str | None = None  # e.g. "gravando a partir de agora (sem live-from-start)"
+    segment_seconds: int = 300
+    live_from_start: bool = False
+    auto_clip: bool = True
+    min_score: float = 70.0
+    stop_requested: bool = False  # "Parar" clicked: the capture process finishes cleanly
+    restarts: int = 0  # times the supervisor restarted a dead capture process
+    reconnects: int = 0  # times the stream dropped and the capture reconnected
+    # Simulation (`clipador live --simular`): a local file played as if it were a live.
+    sim_file: str | None = None
+    sim_speed: float | None = None
+    run_id: int | None = Field(default=None, foreign_key="analysis_run.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def active(self) -> bool:
+        return self.status in ACTIVE_LIVE_STATUSES
+
+
+class SegmentStatus(StrEnum):
+    RECORDING = "recording"
+    CLOSED = "closed"  # finished on disk, analysis queued
+    ANALYZED = "analyzed"
+    FAILED = "failed"
+    EXPIRED = "expired"  # file deleted by the retention policy (or merged into the VOD)
+
+
+class LiveSegment(SQLModel, table=True):
+    __tablename__ = "live_segment"
+    __table_args__ = (UniqueConstraint("session_id", "index", name="uq_segment_session_index"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="live_session.id", index=True)
+    index: int
+    path: str | None = None  # relative to data_dir (None once expired)
+    start_offset_s: float = 0.0  # on the session's global timeline
+    duration_s: float = 0.0
+    status: str = Field(default=SegmentStatus.RECORDING)
+    error: str | None = None
+    analyzed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def end_offset_s(self) -> float:
+        return self.start_offset_s + self.duration_s

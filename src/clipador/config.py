@@ -116,6 +116,25 @@ class Settings(BaseSettings):
     review_prefetch: int = 3  # faithful previews queued ahead for the next N pending clips
     clip_min_seconds: float = 3.0  # limits when adjusting start/end by hand
     clip_max_seconds: float = 180.0
+    # After an analysis (VOD or live), faithful previews of the top N by final score are queued
+    # in the background, below renders asked for by hand. 0 = off.
+    auto_preview_top_n: int = 12
+
+    # --- live capture (step 5E) ---
+    live_segment_seconds: int = 300  # each segment is analyzed as soon as it closes
+    live_context_seconds: float = 60.0  # tail of the previous segment analyzed with each one
+    live_min_score: float = 70.0  # default auto-clip threshold (final score) of a session
+    live_min_free_gb: float = 20.0  # stop capturing (and warn) below this free space
+    live_retention_hours: float = 6.0  # analyzed segments with no candidate are deleted after
+    live_baseline_minutes: float = 30.0  # rolling audio baseline (per session)
+    live_warmup_seconds: float = 180.0  # below this much history the baseline uses the window
+    live_heartbeat_seconds: float = 5.0
+    live_stale_seconds: float = 60.0  # no heartbeat for this long = capture process is dead
+    live_max_restarts: int = 5  # the worker restarts a dead capture up to this many times
+    live_reconnect_wait_seconds: float = 10.0
+    live_max_reconnect_failures: int = 6  # consecutive failed reconnects = live is over
+    live_watch_interval_seconds: float = 120.0  # streamers with auto_watch: check if live
+    live_twitch_chat: bool = True  # read the Twitch chat (anonymous IRC, read-only)
 
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
