@@ -18,6 +18,7 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
   ajuste do corte na forma de onda e histórico com desfazer.
 - Passo 5B: editor de legenda palavra a palavra, glossário por streamer, verificações antes de
   publicar ("pronto para publicar") e calibração dos pesos com `clipador calibrate`.
+- Passo 5C: detecção automática da facecam (`clipador facecam`, "Detectar de novo").
 
 ## Detecção de momentos (Passo 2)
 
@@ -112,9 +113,9 @@ Na página da fonte, em cada candidato (seção **Corte vertical 9:16**):
 - **Layouts:** *Fundo borrado*; *Facecam embaixo* (jogo em cima, câmera embaixo); *Jogo cheio*
   (recorte 9:16 do jogo, com **zoom** e **foco horizontal** 0–1). Sem facecam definida, cai para
   fundo borrado e avisa na tela.
-- **Facecam:** na página do streamer, arraste um retângulo sobre um quadro de uma fonte dele
-  (precisa de pelo menos uma fonte baixada). Fica salvo em coordenadas relativas (0–1): vale
-  para 720p, 1080p, 1440p, 21:9…
+- **Facecam:** detectada sozinha (veja "Facecam automática (Passo 5C)"); na página do streamer
+  dá para corrigir arrastando um retângulo sobre um quadro de uma fonte dele. Fica salvo em
+  coordenadas relativas (0–1): vale para 720p, 1080p, 1440p, 21:9…
 - **Legendas palavra por palavra** (ASS) com a fonte embutida **Anton** (licença OFL, em
   `assets/fonts/`), 2–4 palavras por vez, no máximo 2 linhas, nunca menos de 0,25 s na tela, dentro
   da **zona segura** (acima dos ~20% de baixo e abaixo dos ~10% de cima, que a interface das
@@ -236,6 +237,37 @@ Os atalhos não disparam enquanto você digita num campo (a nota, por exemplo); 
   (só a detecção, sem retranscrever); **Reverter** reanalisa com os parâmetros de antes. Nada é
   aplicado automaticamente. O "antes/depois" usa a mesma aproximação linear da nota de detecção
   (média ponderada do detalhamento por sinal) nos dois lados.
+
+## Facecam automática (Passo 5C)
+
+Ao baixar uma fonte (e ao analisar), se o streamer ainda **não tem facecam**, o Clipador procura
+sozinho: pega ~16 quadros espalhados pelo vídeo (640 px, sem os primeiros/últimos segundos), acha
+rostos com o OpenCV (**YuNet**, baixado uma vez para `data/models/`; sem internet ou se o
+download falhar, usa o **Haar** que já vem no OpenCV 4.x; o OpenCV 5 tirou o Haar, por isso o
+projeto fixa `opencv-python-headless<5`), fica com o rosto que aparece **sempre no
+mesmo lugar** (personagens do jogo que se mexem são descartados) e expande até as bordas da
+câmera (fundo da câmera parado × jogo mexendo, e bordas/molduras fixas). Sem borda clara, usa
+uma margem proporcional ao rosto encostada no canto mais próximo. Tudo na CPU, alguns segundos.
+
+- A página do streamer mostra o quadro com a caixa, **"Detectada automaticamente (NN% de
+  confiança), ajuste se precisar"** e o botão **Detectar de novo**. Os campos x/y/largura/altura
+  (e arrastar sobre o quadro) viram ajuste fino opcional.
+- **Corrigir:** mexa nos campos ou arraste e salve. A caixa passa a ser "marcada à mão" e **nunca
+  é sobrescrita automaticamente**; "Detectar de novo" pede confirmação antes de substituí-la.
+- **Sem facecam** (confiança baixa, abaixo de `CLIPADOR_FACECAM_MIN_CONFIDENCE=0.45`): nada é
+  salvo, a página avisa "Facecam não detectada, marque à mão se quiser" e os cortes usam um
+  layout sem câmera (o *Facecam embaixo* cai para *Fundo borrado*, com aviso).
+
+```powershell
+uv run clipador facecam 3              # fonte #3: imprime caixa/confiança, salva data/work/3/facecam_preview.png
+uv run clipador facecam Fulano         # última fonte baixada do streamer (nome ou canal)
+uv run clipador facecam 3 --nao-salvar # só mostra
+uv run clipador facecam 3 --sobrescrever   # substitui também uma caixa marcada à mão
+```
+
+Na prévia, verde = caixa salva, amarelo = rosto, vermelho = tentativa rejeitada. Configuração:
+`CLIPADOR_FACECAM_AUTO_DETECT` (padrão `true`), `CLIPADOR_FACECAM_MODEL_DOWNLOAD` (`false` = só
+Haar, sem internet), `CLIPADOR_FACECAM_SAMPLES` (16).
 
 ## Requisitos (Windows 11)
 
