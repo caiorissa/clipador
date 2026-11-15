@@ -43,7 +43,18 @@ Sem internet ou sem GitHub, dá para clonar do arquivo do backup:
 
 ## 3. Dados e configuração
 
-Extraia o backup (dê dois cliques no `.tar` ou rode `tar -xf Clipador-backup-*.tar`) e copie:
+O backup completo está anexado, em duas partes, ao release **privado** `backup-2026-11-14` do
+repositório (só a sua conta vê). Baixe, junte e confira:
+
+```bash
+cd ~/Downloads
+gh release download backup-2026-11-14 --repo caiorissa/clipador
+cat Clipador-backup-2026-11-14.tar.part1 Clipador-backup-2026-11-14.tar.part2 > Clipador-backup-2026-11-14.tar
+shasum -a 256 -c Clipador-backup-2026-11-14.sha256.txt     # tem que dizer "OK"
+tar -xf Clipador-backup-2026-11-14.tar                     # cria ~/Downloads/Clipador-backup
+```
+
+(Se você levou o `.tar` por pendrive ou nuvem, pule o download e só extraia.) Depois copie:
 
 ```bash
 BK=~/Downloads/Clipador-backup          # pasta onde você extraiu o backup
