@@ -23,10 +23,16 @@ máquina e outro sistema.
 Instale o [Homebrew](https://brew.sh) e depois, no Terminal:
 
 ```bash
-brew install uv ffmpeg git gh
+brew install uv git gh
+# ffmpeg COM libass (o ffmpeg padrão do Homebrew vem sem libass e as legendas não queimam):
+brew tap homebrew-ffmpeg/ffmpeg
+brew trust homebrew-ffmpeg/ffmpeg
+brew uninstall --ignore-dependencies ffmpeg 2>/dev/null
+brew install homebrew-ffmpeg/ffmpeg/ffmpeg       # compila no Mac (10-20 min)
 ```
 
-O `ffmpeg` do Homebrew já vem com libass (legendas) e os filtros que o Clipador usa.
+Confira: `ffmpeg -hide_banner -filters | grep -w subtitles` precisa mostrar uma linha
+(o `clipador doctor` também avisa se faltar).
 Opcionais: `brew install deno` (formatos do YouTube) e o app do [Ollama](https://ollama.com/download)
 (IA local; no Mac ele usa a GPU da Apple pelo Metal).
 
