@@ -569,6 +569,7 @@ def _save_render_options(
     opts["opening"] = form.get("opening") == "on"
     opts["credit"] = form.get("credit") == "on"
     opts["peak_zoom"] = form.get("peak_zoom") == "on"
+    opts["cut_silences"] = form.get("cut_silences") == "on"
     for key, lo, hi in (("zoom", 1.0, 3.0), ("foco_x", 0.0, 1.0)):
         raw = str(form.get(key, "")).replace(",", ".").strip()
         if raw:

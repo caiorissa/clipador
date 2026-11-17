@@ -252,7 +252,8 @@ class Candidate(SQLModel, table=True):
     overlay_title: str | None = None  # opening text (None = suggestion from the LLM/draft)
     render_layout: str | None = None
     render_style: str | None = None  # caption style key
-    # {"opening": bool, "credit": bool, "zoom": float, "foco_x": float, "peak_zoom": bool}
+    # {"opening": bool, "credit": bool, "zoom": float, "foco_x": float, "peak_zoom": bool,
+    #  "cut_silences": bool}
     render_options: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     # Step 5 (review): when it was approved/rejected/skipped; pre-publish checks (5B).
     reviewed_at: datetime | None = None

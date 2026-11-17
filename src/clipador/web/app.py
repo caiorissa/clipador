@@ -19,6 +19,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Clipador", docs_url=None, redoc_url=None)
     app.state.settings = settings
     app.state.engine = make_engine(settings)
+    from clipador.web.deps import templates
+
+    templates.env.globals["default_cut_silences"] = settings.render_cut_silences
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     for module in (

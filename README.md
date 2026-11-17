@@ -135,6 +135,10 @@ Na página da fonte, em cada candidato (seção **Corte vertical 9:16**):
   `caption_overrides` e mantêm os tempos (o editor completo vem no Passo 5).
 - **Texto de abertura** (2 s, com fade) e **crédito "via @streamer"** discreto durante todo o clip;
   liga/desliga por streamer e por corte. **Zoom rápido no pico** opcional.
+- **Cortar silêncios (jump cuts)**, ligado por padrão: tira tempo morto de dentro do clip, só
+  onde não há fala **e** o áudio está bem mais baixo que a voz do streamer, e nunca perto do
+  pico (ação do jogo sem fala não é cortada). Legenda e zoom acompanham. Desliga por corte
+  ("cortar silêncios") ou em geral com `CLIPADOR_RENDER_CUT_SILENCES=false`.
 - **Áudio** em **−14 LUFS** (ganho medido + limitador de pico, ±1,5 LU), fades de 80 ms, estéreo;
   vídeo em **taxa constante** (VFR da Twitch vira CFR, até 60 fps).
 - Cada render é **validado com ffprobe** (resolução, codecs, áudio, duração ±0,15 s, faststart) e

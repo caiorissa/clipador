@@ -200,7 +200,7 @@ def test_encoder_fallback_nvenc_to_x264(monkeypatch, settings):
             raise ToolError("Falha", detail="[h264_nvenc] OpenEncodeSessionEx failed")
 
     monkeypatch.setattr(ffmpeg, "run_with_progress", fake)
-    plan = type("P", (), {"duration": 3.0})()
+    plan = type("P", (), {"duration": 3.0, "out_duration": 3.0})()
     used = rendering.run_encode(lambda enc: ["-c:v", enc], settings, ffmpeg.NVENC, plan, None,
                                 lambda f: None, lambda m: None)  # fmt: skip
     assert used == "libx264" and calls == [["-c:v", "h264_nvenc"], ["-c:v", "libx264"]]
@@ -475,3 +475,24 @@ def test_render_with_nvenc_on_this_gpu(rsettings, engine, media):
     _sid, (c1, _), _ = seed(rsettings, engine, video)
     r = _render(rsettings, engine, c1)
     assert r.status == RenderStatus.DONE and r.encoder == "h264_nvenc"
+
+
+@requires_ffmpeg
+def test_jump_cut_removes_dead_air_and_keeps_captions_in_sync(rsettings, engine, media):
+    """The test source is silent between 5 s and 6 s, with no words there (4.9-6.0): that gap
+    is cut. The 7-8 s gap has the background tone (as loud as the 'voice') and stays."""
+    video = _copy(media, "16x9", rsettings)
+    _sid, (c1,), _ = seed(rsettings, engine, video, candidates=((0.5, 11.0, 2.0),))
+    r = _render(rsettings, engine, c1, "preview")
+    assert r.status == RenderStatus.DONE, r.error
+    out = rsettings.abs_path(r.path)
+    dur = float(ffprobe_json(out, "format=duration")["format"]["duration"])
+    assert dur == pytest.approx(10.5 - 0.7, abs=0.2)
+    assert r.params["jumpcut"][0] == 1
+    # the flash at 2.0 s (before the cut) is still at 1.5 s of the clip: A/V/caption timing kept
+    assert brightest_frame_time(out) == pytest.approx(FLASH_T - 0.5, abs=0.1)
+
+    _set(engine, Candidate, c1, render_options={"cut_silences": False})
+    r2 = _render(rsettings, engine, c1, "preview")
+    dur2 = float(ffprobe_json(rsettings.abs_path(r2.path), "format=duration")["format"]["duration"])
+    assert dur2 == pytest.approx(10.5, abs=0.2) and "jumpcut" not in r2.params

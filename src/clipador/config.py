@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     render_hwaccel: str = "none"
     render_max_fps: int = 60  # output fps = source fps (VFR -> CFR), capped here
     render_style: str = "destaque_amarelo"
+    # Jump cuts: remove dead air (no words AND clearly quieter than the voice, never near the
+    # peak) inside the clip. Per clip: "cortar silêncios" in the clip options.
+    render_cut_silences: bool = True
+    render_cut_min_gap: float = 1.0  # shortest silence worth cutting (s)
+    render_cut_pad: float = 0.2  # kept on each side of a cut (s)
     zoom_amount: float = 0.12  # punch-in on the peak (0 = off)
     # False = renders wait for the single GPU lock like Whisper/Ollama (one GPU job at a time).
     # Default: False on the PC (NVENC shares the 8 GB of VRAM); True on a Mac, where VideoToolbox

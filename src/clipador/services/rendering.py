@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import shutil
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,7 @@ from clipador.models import (
     Streamer,
 )
 from clipador.render import audio as raudio
-from clipador.render import filters
+from clipador.render import filters, jumpcut
 from clipador.render.package import package_text
 from clipador.render.styles import DEFAULT_FONTS_DIR, get_style
 from clipador.render.subtitles import (
@@ -68,6 +68,28 @@ def resolve_encoder(settings: Settings) -> str:
     if settings.render_encoder == "videotoolbox":
         return ffmpeg.VIDEOTOOLBOX
     return _auto_encoder(settings.ffmpeg_path)
+
+
+def settings_cut_params(settings: Settings) -> jumpcut.CutParams:
+    return jumpcut.CutParams(min_gap=settings.render_cut_min_gap, pad=settings.render_cut_pad)
+
+
+def apply_jump_cuts(plan: RenderPlan, settings: Settings, log=lambda m: None) -> RenderPlan:
+    """Decide the jump cuts from the clip's audio + words and remap captions/zoom peak.
+    Deterministic for the same inputs, so the params hash of the plan stays valid."""
+    if not plan.cut_silences:
+        return plan
+    db = jumpcut.clip_db(plan.video, plan.seek, plan.duration, settings.ffmpeg_path)
+    keeps = jumpcut.keep_intervals([(w.start, w.end) for w in plan.words], db, plan.duration,
+                                   plan.zoom_peak, settings_cut_params(settings))  # fmt: skip
+    if jumpcut.is_trivial(keeps, plan.duration):
+        return plan
+    words = [replace(w, start=jumpcut.remap(w.start, keeps), end=jumpcut.remap(w.end, keeps))
+             for w in plan.words]  # fmt: skip
+    peak = jumpcut.remap(plan.zoom_peak, keeps) if plan.zoom_peak is not None else None
+    saved = plan.duration - jumpcut.total(keeps)
+    log(f"Jump cuts: {len(keeps) - 1} silêncio(s) cortado(s), {saved:.1f}s a menos.")
+    return replace(plan, words=words, zoom_peak=peak, keeps=keeps)
 
 
 def hwaccel_args(settings: Settings) -> list[str]:
@@ -131,10 +153,17 @@ class RenderPlan:
     # Live source: `video` is a window of captured segments starting at this global time.
     seek_offset: float = 0.0
     window: Any = None  # services.live.SegmentWindow (built lazily before encoding)
+    cut_silences: bool = False  # jump cuts (decided at render time from the clip's audio)
+    keeps: list[tuple[float, float]] | None = None  # spans kept by the jump cuts
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    @property
+    def out_duration(self) -> float:
+        """Length of the rendered file (shorter than the source span with jump cuts)."""
+        return sum(b - a for a, b in self.keeps) if self.keeps else self.duration
 
     @property
     def seek(self) -> float:
@@ -214,6 +243,7 @@ def plan_render(
         else None
     )
     peak_on = o.get("peak_zoom", True) and settings.zoom_amount > 0
+    cut = bool(o.get("cut_silences", settings.render_cut_silences))
     peak = c.peak_t - start if peak_on and start <= c.peak_t <= end else None
     overlays = Overlays(opening, settings.opening_text_seconds, credit)
 
@@ -235,11 +265,13 @@ def plan_render(
     }  # fmt: skip
     if window is not None:
         params["file"] = window.key
+    if cut:  # only when on, so renders made without it keep their hash
+        params["jumpcut"] = [1, asdict(settings_cut_params(settings))]
     name = f"{c.rank:02d}_{format_hms(start).replace(':', '')}"
     return RenderPlan(
         c.id, source.id, kind, video, start, end, src_w, src_h, fps, layout, style.key, words,
         rect if layout == "facecam_embaixo" else None, opts, peak, overlays, name, warnings,
-        params_hash(params), params, window.offset if window else 0.0, window,
+        params_hash(params), params, window.offset if window else 0.0, window, cut,
     )  # fmt: skip
 
 
@@ -317,10 +349,13 @@ def prepare_workdir(work: Path, settings: Settings, ass: str) -> None:
 def build_args(plan: RenderPlan, settings: Settings, encoder: str, audio_filter: str,
                out: Path) -> list[str]:  # fmt: skip
     graph = filters.vertical_graph(
-        plan.layout, plan.src_w, plan.src_h, plan.duration,
+        plan.layout, plan.src_w, plan.src_h, plan.out_duration,
         filters.Zoom(plan.zoom_peak, settings.zoom_amount), audio_filter,
         rect=plan.rect, opts=plan.opts, out_size=out_size(settings, plan.kind),
     )  # fmt: skip
+    if plan.keeps:
+        cut_parts, vlabel, alabel = jumpcut.cut_filters(plan.keeps)
+        graph = ";".join([*cut_parts, graph.replace("[0:v]", vlabel).replace("[0:a]", alabel)])
     return [*hwaccel_args(settings), "-ss", f"{plan.seek:.3f}", "-t", f"{plan.duration:.3f}",
             "-i", str(plan.video), "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
             *filters.output_rate_args(
@@ -336,7 +371,7 @@ def run_encode(args_for, settings: Settings, encoder: str, plan: RenderPlan, wor
     Returns the encoder used."""
     try:
         ffmpeg.run_with_progress(
-            args_for(encoder), duration=plan.duration, progress_cb=progress_cb, cwd=work,
+            args_for(encoder), duration=plan.out_duration, progress_cb=progress_cb, cwd=work,
             ffmpeg=settings.ffmpeg_path, error_message="Falha ao renderizar o corte.",
         )  # fmt: skip
         return encoder
@@ -345,7 +380,7 @@ def run_encode(args_for, settings: Settings, encoder: str, plan: RenderPlan, wor
             raise
         log(f"{encoder} falhou ({(e.detail or '')[-160:]}); tentando de novo com libx264 (CPU).")
         ffmpeg.run_with_progress(
-            args_for(ffmpeg.X264), duration=plan.duration, progress_cb=progress_cb, cwd=work,
+            args_for(ffmpeg.X264), duration=plan.out_duration, progress_cb=progress_cb, cwd=work,
             ffmpeg=settings.ffmpeg_path, error_message="Falha ao renderizar o corte.",
         )  # fmt: skip
         return ffmpeg.X264
@@ -371,6 +406,7 @@ def execute_render(
             from clipador.services import live
 
             live.ensure_window_video(plan.window, settings.ffmpeg_path)
+        plan = apply_jump_cuts(plan, settings, log)
         encoder = resolve_encoder(settings)
         gain = None
         if plan.kind == RenderKind.FINAL:
@@ -379,14 +415,14 @@ def execute_render(
                 settings.loudness_true_peak, settings.ffmpeg_path,
             )  # fmt: skip
         audio_filter = raudio.loudnorm_filter(
-            settings.loudness_target, settings.loudness_true_peak, gain, plan.duration,
+            settings.loudness_target, settings.loudness_true_peak, gain, plan.out_duration,
             settings.audio_fade_seconds,
         )  # fmt: skip
         zone = safe_zone(filters.OUT_W, filters.OUT_H, settings.safe_bottom, settings.safe_top,
                          settings.caption_lift)  # fmt: skip
         style = get_style(plan.style_key, settings.caption_styles_path)
         ass = build_ass(
-            plan.words, plan.duration, style, zone, plan.overlays, settings.min_caption_event
+            plan.words, plan.out_duration, style, zone, plan.overlays, settings.min_caption_event
         )
         prepare_workdir(work, settings, ass)
         log(f"#{c.rank}: {kind_label} de {plan.duration:.0f}s ({LAYOUT_LABELS[plan.layout]}, "
@@ -397,7 +433,7 @@ def execute_render(
         )  # fmt: skip
         w, h = out_size(settings, plan.kind)
         probe, problems = validate_render(
-            tmp_out, w, h, plan.duration, ffprobe=settings.ffprobe_path
+            tmp_out, w, h, plan.out_duration, ffprobe=settings.ffprobe_path
         )
         if problems:
             raise ClipadorError("O arquivo renderizado não passou na verificação: "
@@ -414,7 +450,7 @@ def execute_render(
         if plan.kind == RenderKind.FINAL:
             thumb = final.with_suffix(".jpg")
             with contextlib.suppress(ToolError):
-                ffmpeg.make_thumbnail(final, thumb, plan.zoom_peak or plan.duration / 3,
+                ffmpeg.make_thumbnail(final, thumb, plan.zoom_peak or plan.out_duration / 3,
                                       settings.ffmpeg_path)  # fmt: skip
             row.thumbnail_path = settings.rel_path(thumb) if thumb.is_file() else None
             drafts, alerts = _drafts_for_package(session, settings, c)

@@ -116,6 +116,7 @@
           <label class="check small"><input type="checkbox" name="opening" {{ 'checked' if o.get('opening', st.show_opening_text if st else true) }}> texto de abertura (2 s)</label>
           <label class="check small"><input type="checkbox" name="credit" {{ 'checked' if o.get('credit', st.show_credit if st else true) }}> crédito "via @…"</label>
           <label class="check small"><input type="checkbox" name="peak_zoom" {{ 'checked' if o.get('peak_zoom', true) }}> zoom no pico</label>
+          <label class="check small" title="Tira trechos sem fala e mais baixos que a voz (nunca perto do pico). A legenda acompanha."><input type="checkbox" name="cut_silences" {{ 'checked' if o.get('cut_silences', default_cut_silences) }}> cortar silêncios</label>
         </div>
         <label>Texto de abertura <span class="small muted">(vazio = sem texto)</span>
           <input name="overlay_title" maxlength="80" value="{{ c.overlay_title if c.overlay_title is not none else (item.title_suggestion or '') }}">
