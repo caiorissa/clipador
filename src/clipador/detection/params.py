@@ -6,14 +6,20 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-SIGNALS = ("audio", "chat", "speech", "keywords")
-SIGNAL_LABELS = {"audio": "Áudio", "chat": "Chat", "speech": "Fala", "keywords": "Palavras"}
+SIGNALS = ("audio", "chat", "speech", "keywords", "reaction")
+SIGNAL_LABELS = {
+    "audio": "Áudio",
+    "chat": "Chat",
+    "speech": "Fala",
+    "keywords": "Palavras",
+    "reaction": "Reação",  # laughs, screams, cheering (YAMNet audio events)
+}
 
 PRESETS: dict[str, dict[str, float]] = {
-    "equilibrado": {"audio": 1.0, "chat": 1.0, "speech": 0.6, "keywords": 0.8},
-    "foco_chat": {"audio": 0.6, "chat": 2.0, "speech": 0.4, "keywords": 0.6},
-    "foco_audio": {"audio": 2.0, "chat": 0.6, "speech": 0.6, "keywords": 0.6},
-    "foco_fala": {"audio": 0.6, "chat": 0.6, "speech": 1.5, "keywords": 1.5},
+    "equilibrado": {"audio": 1.0, "chat": 1.0, "speech": 0.6, "keywords": 0.8, "reaction": 1.0},
+    "foco_chat": {"audio": 0.6, "chat": 2.0, "speech": 0.4, "keywords": 0.6, "reaction": 0.6},
+    "foco_audio": {"audio": 2.0, "chat": 0.6, "speech": 0.6, "keywords": 0.6, "reaction": 1.5},
+    "foco_fala": {"audio": 0.6, "chat": 0.6, "speech": 1.5, "keywords": 1.5, "reaction": 0.8},
 }
 PRESET_LABELS = {
     "equilibrado": "Equilibrado",
@@ -41,6 +47,10 @@ class FeatureParams(BaseModel):
     smoothing_sigma_s: float = 1.5
     # Fine RMS resolution used to find pauses when snapping edges (frames per second).
     fine_fps: int = 10
+    # Audio events (YAMNet): an event probability of this size counts as a full reaction.
+    reaction_full_prob: float = 0.35
+    # A second "has music" at this probability (copyright warning on the candidate).
+    music_prob: float = 0.4
 
 
 class CandidateParams(BaseModel):

@@ -233,6 +233,9 @@ def detect_candidates(
             for k in SIGNALS
         }
         snippet = " ".join(w[2] for w in words if s_abs <= w[0] < e_abs)
+        if "music" in feats.extra:  # share of the clip with background music (copyright risk)
+            m = feats.extra["music"][max(0, a) : max(a + 1, b)]
+            breakdown["music"] = round(100 * float(m.mean()), 1) if m.size else 0.0
         results.append(
             CandidateResult(
                 start=round(s_abs, 2),

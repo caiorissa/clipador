@@ -35,6 +35,8 @@ def settings(tmp_path: Path) -> Settings:
         auto_preview_top_n=0,
         # Same transcription path on every OS (tests never load a real model anyway).
         whisper_backend="faster-whisper",
+        # No YAMNet download in tests (tests/test_audio_events.py uses a fake model).
+        audio_events=False,
     )
 
 

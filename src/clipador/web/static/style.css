@@ -181,7 +181,7 @@ tr.inactive td { opacity: .55; }
 .bd-row { display: grid; grid-template-columns: 70px 1fr 30px; gap: .4rem; align-items: center; font-size: .82rem; }
 .bd-bar { height: 7px; background: var(--bg); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
 .bd-fill { display: block; height: 100%; }
-.bd-audio { background: #4fb6ff; } .bd-chat { background: #53fc18; } .bd-speech { background: #e6a700; } .bd-keywords { background: var(--accent); }
+.bd-audio { background: #4fb6ff; } .bd-chat { background: #53fc18; } .bd-speech { background: #e6a700; } .bd-keywords { background: var(--accent); } .bd-reaction { background: #ff7ab6; }
 .bd-val { text-align: right; color: var(--muted); }
 .snippet { margin: .3rem 0 .5rem; font-size: .88rem; color: #cfd3da; max-height: 4.5em; overflow: auto; }
 .cand-actions { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .5rem; }

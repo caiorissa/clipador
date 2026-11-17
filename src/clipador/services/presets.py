@@ -49,12 +49,18 @@ def save_store(settings: Settings, data: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def _with_defaults(weights: dict) -> dict[str, float]:
+    """Calibrated presets saved before a signal existed get the default weight for it."""
+    base = PRESETS["equilibrado"]
+    return {k: float(weights[k]) if k in weights else base[k] for k in SIGNALS}
+
+
 def all_presets(settings: Settings) -> tuple[dict[str, str], dict[str, dict[str, float]]]:
     """(labels, weights) of the built-in + calibrated presets, built-ins first."""
     labels, weights = dict(PRESET_LABELS), {k: dict(v) for k, v in PRESETS.items()}
     for key, p in load_store(settings)["presets"].items():
         labels[key] = p.get("label", key)
-        weights[key] = {k: float(p["weights"].get(k, 0.0)) for k in SIGNALS}
+        weights[key] = _with_defaults(p["weights"])
     return labels, weights
 
 
@@ -63,7 +69,7 @@ def params_for_preset(settings: Settings, key: str) -> DetectParams:
     custom = load_store(settings)["presets"].get(key)
     if custom:
         p.candidates.preset = key
-        p.candidates.weights = {k: float(custom["weights"].get(k, 0.0)) for k in SIGNALS}
+        p.candidates.weights = _with_defaults(custom["weights"])
         p.ranking = custom.get("ranking")
     return p
 

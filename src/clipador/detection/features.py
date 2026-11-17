@@ -176,6 +176,29 @@ def chat_signal(
     return smooth(sig, p.smoothing_sigma_s), {"chat_msgs": msgs}
 
 
+# --- audio events (YAMNet) ---------------------------------------------------------------------
+
+
+def _fit(x: np.ndarray, n: int) -> np.ndarray:
+    return x[:n] if x.size >= n else np.concatenate([x, np.zeros(n - x.size)])
+
+
+def reaction_signal(
+    events: dict[str, np.ndarray], n: int, p: FeatureParams
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Laughs, screams and cheering: part absolute (a clear laugh is a laugh), part relative to
+    the local baseline (a streamer who laughs all the time needs a bigger one)."""
+    laugh, scream, cheer = (_fit(events[k], n) for k in ("laugh", "scream", "cheer"))
+    raw = np.maximum.reduce([laugh, scream, 0.8 * cheer])
+    absolute = np.clip(raw / max(p.reaction_full_prob, 1e-3), 0, 1)
+    rel = squash(robust_local_z(smooth(raw, 1.0), p.baseline_window_s, min_scale=0.03), p.z_scale)
+    sig = np.clip(0.6 * absolute + 0.4 * rel, 0, 1)
+    extra = {"ev_laugh": laugh, "ev_scream": scream, "ev_cheer": cheer}
+    if "music" in events:  # 1 = background music in that second
+        extra["music"] = (_fit(events["music"], n) >= p.music_prob).astype(float)
+    return smooth(sig, p.smoothing_sigma_s), extra
+
+
 # --- bundle ----------------------------------------------------------------------------------
 
 
@@ -220,6 +243,7 @@ def compute_features(
     chat: list[ChatMessage] | None,
     lex: HypeLexicon,
     p: FeatureParams,
+    events: dict[str, np.ndarray] | None = None,
 ) -> Features:
     fine = rms_db_frames(blocks, sample_rate, p.fine_fps)
     rms = per_second_db(fine, p.fine_fps)
@@ -231,4 +255,7 @@ def compute_features(
     if chat:
         signals["chat"], chat_extra = chat_signal(chat, t0, n, lex, p)
         extra.update(chat_extra)
+    if events:
+        signals["reaction"], ev_extra = reaction_signal(events, n, p)
+        extra.update(ev_extra)
     return Features(t0, signals, fine, p.fine_fps, extra)

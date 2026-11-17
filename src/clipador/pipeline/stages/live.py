@@ -23,8 +23,10 @@ import contextlib
 import time
 from pathlib import Path
 
+import numpy as np
 from sqlmodel import col, select
 
+from clipador.detection import audio_events
 from clipador.detection.candidates import CandidateResult, detect_candidates
 from clipador.detection.features import compute_features
 from clipador.detection.hype import ensure_hype_file, load_lexicon
@@ -236,10 +238,18 @@ class LiveAnalyzeStage(Stage):
         with ctx.session() as s:
             run = s.get(AnalysisRun, ls.run_id) if ls.run_id else None
         params = DetectParams.from_payload(run.params if run else None, settings.detect_preset)
+        events = None
+        if settings.audio_events:
+            try:
+                model = audio_events.make_model(settings, ctx.log)
+                n = int(np.ceil(sum(r.duration for r in readers)))
+                events = audio_events.compute_events(_blocks(readers), n, t0, model).series
+            except audio_events.AudioEventsUnavailable as e:
+                ctx.log(f"Sem eventos de áudio ({e}).")
         feats = compute_features(
             blocks=_blocks(readers), sample_rate=readers[0].sample_rate, t0=t0, words=words3,
             chat=chat or None, lex=load_lexicon(ensure_hype_file(settings.hype_words_path)),
-            p=params.features,
+            p=params.features, events=events,
         )  # fmt: skip
         results, _curve, _eff = detect_candidates(feats, words3, params.candidates)
         new_from = max(t0, seg.start_offset_s - settings.live_context_seconds)

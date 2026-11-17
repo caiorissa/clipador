@@ -2,6 +2,10 @@
 {% set severe = ['discurso_de_odio_ou_ofensa', 'violencia_real_ou_autolesao', 'conteudo_sexual', 'dados_pessoais_ou_doxxing'] %}
 {% set medium = ['xingamento_pesado', 'apostas_ou_promocao'] %}
 {% set alert_labels = {'xingamento_pesado': 'xingamento pesado', 'discurso_de_odio_ou_ofensa': 'ódio/ofensa', 'violencia_real_ou_autolesao': 'violência real/autolesão', 'conteudo_sexual': 'conteúdo sexual', 'dados_pessoais_ou_doxxing': 'dados pessoais', 'apostas_ou_promocao': 'apostas/promoção', 'outro': 'outro'} %}
+{% set music = (c.breakdown or {}).get('music') if c is defined and c else none %}
+{% if music is not none and music >= 25 %}
+  <div class="alerts"><span class="alert-badge {{ 'sev-high' if music >= 60 else 'sev-mid' }}" title="Detectado pelo modelo de eventos de áudio (YAMNet). Música de terceiros pode derrubar ou desmonetizar o clip.">🎵 música em {{ music|round|int }}% do trecho: confira os direitos autorais</span></div>
+{% endif %}
 {% if e and e.status == 'ok' %}
   <p class="motivo small">🤖 {{ e.motivo }}</p>
   {% if e.alertas %}

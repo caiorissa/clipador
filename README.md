@@ -33,11 +33,18 @@ da detecção") roda só a detecção e leva segundos.
 | Extrair áudio | WAV 16 kHz mono do trecho escolhido | `audio.wav` |
 | Transcrever | faster-whisper na GPU, em blocos de 10 min (retoma do último bloco se cair) | `transcript.json.gz` |
 | Chat | Twitch via TwitchDownloaderCLI, YouTube via replay de chat do yt-dlp; Kick indisponível | `chat.jsonl.gz` |
-| Detectar | features por segundo + curva de interesse + picos → candidatos | `features.npz` + banco |
+| Detectar | features por segundo (áudio, fala, chat, reação) + curva de interesse + picos → candidatos | `features.npz` + banco |
 
 Sem chat a etapa fica como "pulado" e a nota usa só áudio e fala (os pesos se renormalizam).
 Para o chat da Twitch, baixe o **TwitchDownloaderCLI** em
 <https://github.com/lay295/TwitchDownloader/releases> e aponte `CLIPADOR_TWITCH_DOWNLOADER_PATH`.
+
+**Reação e música (eventos de áudio):** o modelo YAMNet (Google, AudioSet; ~16 MB, baixado uma
+vez para `data/models`, conferido por SHA-256) roda na CPU (~5 s por hora de áudio) e reconhece
+**risadas, gritos e comemoração**, que viram o sinal **Reação** da nota (o volume sozinho não
+distingue um grito de uma explosão do jogo). Ele também mede a **música de fundo**: candidatos
+com música em boa parte do trecho ganham o alerta "🎵 confira os direitos autorais". Desligar:
+`CLIPADOR_AUDIO_EVENTS=false`. Sem internet na primeira vez, a análise segue sem esse sinal.
 
 **Palavras de empolgação:** edite `data/hype_words.toml` (criado na primeira análise). Mudar o
 arquivo faz a próxima reanálise recalcular as features (rápido; não retranscreve).
@@ -101,7 +108,8 @@ sobrescritos sem você marcar "sobrescrever o que eu editei".
 ao terminar (medido: ~2,1 GB → volta a ~170 MB acima do normal) e o modelo do Ollama é
 descarregado no fim do estágio (`keep_alive=0`); os dois valores aparecem no log do job.
 
-> ⚠️ A IA não detecta **música com direitos autorais** de fundo: confira antes de postar.
+> ⚠️ A IA não detecta **música com direitos autorais**; o detector de eventos de áudio avisa
+> quando há música de fundo no trecho, mas não sabe se ela é liberada: confira antes de postar.
 
 ## Cortes prontos (Passo 4)
 

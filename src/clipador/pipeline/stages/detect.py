@@ -12,6 +12,7 @@ import time
 import numpy as np
 from sqlmodel import col, select
 
+from clipador.detection import audio_events
 from clipador.detection.candidates import detect_candidates
 from clipador.detection.features import Features, compute_features
 from clipador.detection.hype import ensure_hype_file, load_lexicon
@@ -73,16 +74,23 @@ class DetectInputs:
         )
         hype_path = ensure_hype_file(settings.hype_words_path)
         self.hype_path = hype_path
-        self.features_hash = params_hash(
-            {
-                "v": VERSION,
-                "audio": self.audio.params_hash,
-                "transcript": self.transcript.params_hash,
-                "chat": self.chat.params_hash if self.chat else None,
-                "hype": file_hash(hype_path),
-                "features": self.params.features.model_dump(),
-            }
-        )
+        self.use_events = bool(settings.audio_events)
+        self.set_hashes(self.use_events)
+
+    def set_hashes(self, events: bool) -> None:
+        """features/run hashes; `events` = YAMNet audio events are part of the features."""
+        key = {
+            "v": VERSION,
+            "audio": self.audio.params_hash,
+            "transcript": self.transcript.params_hash,
+            "chat": self.chat.params_hash if self.chat else None,
+            "hype": file_hash(self.hype_path),
+            "features": self.params.features.model_dump(),
+        }
+        if events:  # only when on, so a run without events keeps its old hash
+            key["events"] = audio_events.VERSION
+        self.use_events = events
+        self.features_hash = params_hash(key)
         run_key = {
             "features": self.features_hash,
             "candidates": self.params.candidates.model_dump(),
@@ -90,6 +98,20 @@ class DetectInputs:
         if self.params.ranking:  # only when set, so older run hashes stay the same
             run_key["ranking"] = self.params.ranking
         self.run_hash = params_hash(run_key)
+
+
+def load_events(ctx: StageContext, reader: WavReader, t0: float) -> dict | None:
+    """YAMNet events per second for the whole WAV, or None (logged) if the model can't run."""
+    n = int(np.ceil(reader.duration))
+    try:
+        model = audio_events.make_model(ctx.settings, ctx.log)
+        t = time.monotonic()
+        ev = audio_events.compute_events(reader.blocks(60.0), n, t0, model)
+        ctx.log(f"Eventos de áudio (risada/grito/música) em {time.monotonic() - t:.1f}s.")
+        return ev.series
+    except audio_events.AudioEventsUnavailable as e:
+        ctx.log(f"Sem eventos de áudio ({e}): a nota segue sem o sinal de reação.")
+        return None
 
 
 def latest_run(ctx: StageContext, source_id: int) -> AnalysisRun | None:
@@ -133,6 +155,11 @@ class DetectStage(Stage):
                 load_chat(settings.abs_path(inp.chat.files["chat"])).messages if inp.chat else None
             )
             t_feat = time.monotonic()
+            events = None
+            if inp.use_events:
+                events = load_events(ctx, reader, float(inp.audio.summary.get("offset", 0.0)))
+                if events is None:  # model unavailable: cache these features as "no events"
+                    inp.set_hashes(False)
             feats = compute_features(
                 blocks=reader.blocks(60.0),
                 sample_rate=reader.sample_rate,
@@ -141,6 +168,7 @@ class DetectStage(Stage):
                 chat=chat_msgs,
                 lex=load_lexicon(inp.hype_path),
                 p=inp.params.features,
+                events=events,
             )
             out = settings.source_work_dir(source.id) / "features.npz"
             feats.save(out)

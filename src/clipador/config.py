@@ -148,6 +148,10 @@ class Settings(BaseSettings):
 
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
+    # YAMNet audio events (laughs, screams, cheering -> "Reação"; background music -> copyright
+    # warning). CPU, ~5 s per hour of audio; the 16 MB model is downloaded once.
+    audio_events: bool = True
+    audio_events_download: bool = True
     # Tolerance (s) when checking if a golden moment falls inside a candidate (clipador eval).
     eval_tolerance_seconds: float = 2.0
 
