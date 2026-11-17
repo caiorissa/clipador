@@ -151,6 +151,11 @@ class Settings(BaseSettings):
     live_watch_interval_seconds: float = 120.0  # streamers with auto_watch: check if live
     live_twitch_chat: bool = True  # read the Twitch chat (anonymous IRC, read-only)
 
+    # --- publishing (step 6) ---
+    # OAuth client JSON ("Desktop app") from Google Cloud with the YouTube Data API v3 enabled.
+    youtube_client_secrets: Path | None = None
+    youtube_metrics_hours: float = 6.0  # refresh views/likes of published clips (0 = off)
+
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala
     # YAMNet audio events (laughs, screams, cheering -> "Reação"; background music -> copyright

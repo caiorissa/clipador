@@ -9,7 +9,16 @@ from fastapi.staticfiles import StaticFiles
 from clipador.config import Settings, get_settings
 from clipador.db import make_engine, run_migrations
 from clipador.web.deps import STATIC_DIR
-from clipador.web.routes import analysis, jobs, live, review, sources, streamers, system
+from clipador.web.routes import (
+    analysis,
+    jobs,
+    live,
+    publish,
+    review,
+    sources,
+    streamers,
+    system,
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -30,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         analysis,
         review,
         live,
+        publish,
         jobs,
         system,
     ):  # sources before analysis

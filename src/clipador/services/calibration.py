@@ -38,7 +38,12 @@ LABELS = {CandidateStatus.APPROVED: 1, CandidateStatus.RENDERED: 1, CandidateSta
 
 def collect_samples(session: Session, settings: Settings, source_id: int | None = None):
     """Reviewed candidates (approved/rendered = 1, rejected = 0; skipped and suggested are
-    ignored) with their breakdown, the weights they were found with and the AI nota."""
+    ignored) with their breakdown, the weights they were found with and the AI nota. Clips
+    published with enough real views are labeled by PERFORMANCE instead (top third of your
+    channel = 1, bottom third = 0): what the audience liked beats what looked good."""
+    from clipador.services.publishing import performance_labels
+
+    perf = performance_labels(session)
     q = select(Candidate).where(col(Candidate.status).in_(list(LABELS)))
     if source_id is not None:
         q = q.where(Candidate.source_id == source_id)
@@ -62,7 +67,7 @@ def collect_samples(session: Session, settings: Settings, source_id: int | None 
         out.append(
             Sample(
                 breakdown={k: c.breakdown.get(k) for k in SIGNALS},
-                label=LABELS[c.status],
+                label={"bom": 1, "ruim": 0}[perf[c.id]] if c.id in perf else LABELS[c.status],
                 weights={k: float(v) for k, v in weights.items()},
                 llm=e.nota_geral if e else None,
                 w_detect=rank.w_detect,

@@ -145,6 +145,7 @@ class Worker:
                 self.settings.worker_concurrency,
             )
             last_beat = last_recover = last_live = 0.0
+            last_metrics = time.monotonic() - 3600 * self.settings.youtube_metrics_hours + 120
             last_watch = time.monotonic() - self.settings.live_watch_interval_seconds + 15
             while not self.stopping.is_set():
                 started = self.tick()
@@ -155,6 +156,10 @@ class Worker:
                 if now - last_watch >= self.settings.live_watch_interval_seconds:
                     self._live_auto_watch()
                     last_watch = now
+                hours = self.settings.youtube_metrics_hours
+                if hours > 0 and now - last_metrics >= hours * 3600:
+                    self._queue_youtube_metrics()
+                    last_metrics = now
                 if now - last_beat >= HEARTBEAT_SECONDS:
                     queue.heartbeat(self.engine, self.active_job_ids(), self.worker_id)
                     last_beat = now
@@ -198,6 +203,21 @@ class Worker:
 
         self._watch_thread = threading.Thread(target=work, name="live-watch", daemon=True)
         self._watch_thread.start()
+
+    def _queue_youtube_metrics(self) -> None:
+        """Refresh the numbers of published clips (only when YouTube is connected)."""
+        from sqlmodel import Session
+
+        from clipador.services import youtube
+
+        try:
+            if not youtube.connected(self.settings):
+                return
+            with Session(self.engine) as s:
+                queue.enqueue(s, "youtube_metrics", None, {})
+                s.commit()
+        except Exception:
+            log.exception("Falha ao agendar a atualização dos números do YouTube")
 
     def shutdown(self, timeout: float = 20.0) -> None:
         self.stopping.set()

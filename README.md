@@ -19,6 +19,7 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
 - Passo 5B: editor de legenda palavra a palavra, glossário por streamer, verificações antes de
   publicar ("pronto para publicar") e calibração dos pesos com `clipador calibrate`.
 - Passo 5C: detecção automática da facecam (`clipador facecam`, "Detectar de novo").
+- Passo 6: publicar no YouTube (API oficial, agendamento) e números de volta na calibração.
 - Passo 5E: lives ao vivo (gravação em segmentos, análise incremental, clipagem automática com
   prévia, aviso no navegador) e prévias automáticas dos melhores candidatos.
 
@@ -283,6 +284,31 @@ uv run clipador facecam 3 --sobrescrever   # substitui também uma caixa marcada
 Na prévia, verde = caixa salva, amarelo = rosto, vermelho = tentativa rejeitada. Configuração:
 `CLIPADOR_FACECAM_AUTO_DETECT` (padrão `true`), `CLIPADOR_FACECAM_MODEL_DOWNLOAD` (`false` = só
 Haar, sem internet), `CLIPADOR_FACECAM_SAMPLES` (16).
+
+## Publicar no YouTube (Passo 6)
+
+A tela **`/publicar`** envia um clip **aprovado** (com o corte final renderizado) ao YouTube
+Shorts pela **API oficial**, só quando você clica e confirma que revisou direitos, música e
+crédito. Dá para escolher privado / não listado / público e **agendar**. Título, descrição e
+hashtags vêm do rascunho do YouTube do clip. TikTok e Reels: use o vídeo final e o pacote `.txt`.
+
+**Os números voltam:** a cada 6 h o worker busca views, likes e comentários dos vídeos
+publicados. O `clipador calibrate` passa a usar o **desempenho real**: entre os seus clips
+públicos com mais de 2 dias, o terço que mais performou conta como "bom" e o que menos
+performou como "ruim", mesmo que você tenha aprovado os dois. É assim que a detecção aprende o
+que o seu público gosta.
+
+Configurar (uma vez, grátis):
+
+1. <https://console.cloud.google.com> → crie um projeto → **APIs e serviços** → ative a
+   **YouTube Data API v3**.
+2. **Tela de consentimento OAuth**: tipo *Externo*, e adicione o seu e-mail em *Usuários de teste*.
+3. **Credenciais → Criar credenciais → ID do cliente OAuth → App para computador** → baixe o JSON.
+4. No `.env`: `CLIPADOR_YOUTUBE_CLIENT_SECRETS=/caminho/para/client_secret.json`.
+5. Em `/publicar`, **Conectar YouTube** (o token fica em `data/youtube_token.json`, só neste
+   computador; "Desconectar" apaga).
+
+A cota gratuita da API permite cerca de **6 envios por dia**.
 
 ## Ao vivo (Passo 5E)
 

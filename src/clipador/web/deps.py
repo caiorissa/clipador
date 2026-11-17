@@ -44,6 +44,8 @@ JOB_TYPE_LABELS = {
     "live_analyze": "Live: análise do segmento",
     "live_finalize": "Live: montar o vídeo",
     "compile_long": "Vídeo longo",
+    "publish_youtube": "Publicar no YouTube",
+    "youtube_metrics": "YouTube: números",
 }
 KIND_LABELS = {SourceKind.VOD: "VOD", SourceKind.CLIP: "Clip", SourceKind.LIVE: "Live"}
 

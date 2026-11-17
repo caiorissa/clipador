@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Publicar{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Publicar</h1></div>
+<p class="muted">Envia ao YouTube Shorts pela API oficial, só quando você clica e só clips aprovados.
+  TikTok e Reels: use o vídeo final e o pacote (.txt) de cada corte. Os números dos vídeos voltam
+  para cá a cada {{ '6' }} h e entram no <code>clipador calibrate</code> (o que performou bem ensina a detecção).</p>
+
+<div class="card">
+  <h3>YouTube</h3>
+  {% if not configured %}
+    <p class="small warn-text">{{ setup_error }}</p>
+  {% elif connected %}
+    <p>✔ Conectado{% if channel %} ao canal <strong>{{ channel.title }}</strong>{% endif %}.</p>
+    <div class="cand-actions">
+      <form method="post" action="/publicar/youtube/numeros"><button class="btn small">Atualizar números agora</button></form>
+      <form method="post" action="/publicar/youtube/desconectar"><button class="btn small danger">Desconectar</button></form>
+    </div>
+  {% else %}
+    <p class="small muted">Abre a tela de autorização do Google neste navegador; o token fica só neste computador.</p>
+    <a class="btn primary" href="/publicar/youtube/conectar">Conectar YouTube</a>
+  {% endif %}
+</div>
+
+{% if form %}{% set c = form.candidate %}{% set d = form.draft %}
+<form method="post" action="/candidatos/{{ c.id }}/publicar/youtube" class="card form">
+  <h3>Enviar o clip #{{ c.rank }} {% if form.source %}de {{ form.source.title or form.source.url }}{% endif %}</h3>
+  {% if not form.render %}<div class="flash warn small">Renderize o corte final antes de publicar.</div>{% endif %}
+  {% if form.render %}<video class="rendered" controls preload="metadata" playsinline src="/arquivos/{{ form.render.path }}" style="max-height: 360px"></video>{% endif %}
+  <label>Título
+    <input name="title" maxlength="100" value="{{ d.title if d else '' }}">
+  </label>
+  {% if d %}<p class="small muted">Descrição e hashtags vêm do rascunho do YouTube do clip (edite na página da fonte):<br>
+    <span style="white-space: pre-line">{{ d.description }}</span><br>{{ d.hashtags|join(' ') }}</p>{% endif %}
+  <div class="grid3">
+    <label>Visibilidade
+      <select name="privacy">
+        {% for k, v in privacy_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == 'private' }}>{{ v }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Agendar (opcional)
+      <input type="datetime-local" name="publish_at">
+    </label>
+  </div>
+  <label class="check small"><input type="checkbox" name="confirm"> Revisei o clip: o streamer autoriza, o crédito está certo e não há música com direitos autorais.</label>
+  <div class="form-actions"><button class="btn primary" {{ 'disabled' if not (connected and form.render) }}>Enviar ao YouTube</button></div>
+</form>
+{% endif %}
+
+{% if pubs %}
+<div class="table-wrap">
+<table class="jobs">
+  <thead><tr><th>Clip</th><th>Status</th><th>Visibilidade</th><th>Views</th><th>Likes</th><th>Coment.</th><th></th></tr></thead>
+  <tbody>
+  {% for p in pubs %}{% set c = cands.get(p.candidate_id) %}
+    <tr>
+      <td class="small">{{ p.title }}{% if c %}<div class="muted">fonte #{{ c.source_id }} · clip #{{ c.rank }}</div>{% endif %}</td>
+      <td class="small"><span class="status status-{{ 'done' if p.status == 'published' else ('failed' if p.status == 'failed' else 'running') }}">{{ {'queued': 'na fila', 'uploading': 'enviando', 'published': 'publicado', 'failed': 'falhou'}.get(p.status, p.status) }}</span>
+        {% if p.error %}<div class="error-text">{{ p.error }}</div>{% endif %}
+        {% if p.job_id %}<div><a href="/jobs/{{ p.job_id }}">log</a></div>{% endif %}</td>
+      <td class="small">{{ privacy_labels.get(p.privacy, p.privacy) }}{% if p.publish_at %}<div class="muted">agendado: {{ p.publish_at|dt }}</div>{% endif %}</td>
+      <td>{{ p.views if p.views is not none else '—' }}</td>
+      <td>{{ p.likes if p.likes is not none else '—' }}</td>
+      <td>{{ p.comments if p.comments is not none else '—' }}</td>
+      <td class="actions">{% if p.url %}<a class="btn small" href="{{ p.url }}" target="_blank" rel="noopener">Abrir</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted">Total: {{ total_views }} views{% if pubs[0].metrics_at %} · atualizado em {{ pubs[0].metrics_at|dt }}{% endif %}.</p>
+{% else %}
+  <div class="empty">Nada publicado ainda. Aprove um clip, renderize o final e clique em "Publicar no YouTube".</div>
+{% endif %}
+{% endblock %}

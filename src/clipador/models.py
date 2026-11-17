@@ -492,3 +492,39 @@ class LiveSegment(SQLModel, table=True):
     @property
     def end_offset_s(self) -> float:
         return self.start_offset_s + self.duration_s
+
+
+# --- Publishing (step 6) ---------------------------------------------------------------------
+
+
+class PublicationStatus(StrEnum):
+    QUEUED = "queued"
+    UPLOADING = "uploading"
+    PUBLISHED = "published"  # uploaded (public, unlisted, private or scheduled)
+    FAILED = "failed"
+
+
+class Publication(SQLModel, table=True):
+    """A final render sent to a platform by an explicit click (never automatic). The numbers
+    pulled back later (views/likes) feed `clipador calibrate`: real performance, not guesses."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    candidate_id: int = Field(foreign_key="candidate.id", index=True)
+    render_id: int = Field(foreign_key="render.id")
+    platform: str = "youtube"
+    status: str = Field(default=PublicationStatus.QUEUED, index=True)
+    privacy: str = "private"  # private | unlisted | public
+    publish_at: datetime | None = None  # scheduled (YouTube keeps it private until then)
+    title: str = ""
+    description: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    external_id: str | None = None  # YouTube video id
+    url: str | None = None
+    job_id: int | None = Field(default=None, foreign_key="job.id")
+    error: str | None = Field(default=None, sa_column=Column(Text))
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    metrics_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
