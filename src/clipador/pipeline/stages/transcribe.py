@@ -1,4 +1,4 @@
-"""transcribe: faster-whisper on the GPU, in ~10 min chunks with overlap.
+"""transcribe: Whisper on the GPU (CUDA on the PC, MLX on a Mac), in ~10 min chunks with overlap.
 
 Each finished chunk is saved to disk, so a crash/kill resumes from the last finished chunk.
 Output: work/<id>/transcript.json.gz with word timestamps relative to the ORIGINAL video.
@@ -38,12 +38,15 @@ def audio_artifact(ctx: StageContext, source):
 
 def transcript_params_hash(ctx: StageContext, audio_hash: str) -> str:
     s = ctx.settings
+    backend = tx.resolve_backend(s)
+    extra = {} if backend == "faster-whisper" else {"backend": backend}  # old hashes stay valid
     return params_hash(
         {
             "v": VERSION,
             "audio": audio_hash,
-            "model": s.whisper_model,
-            "compute": s.whisper_compute_type,
+            **extra,
+            "model": tx.resolve_model(s, backend),
+            "compute": s.whisper_compute_type if backend == "faster-whisper" else "float16",
             "language": s.language,
             "beam": s.whisper_beam_size,
             "vad": s.whisper_vad_filter,
@@ -155,7 +158,8 @@ class TranscribeStage(Stage):
         out_path = work / "transcript.json.gz"
         elapsed = time.monotonic() - t0
         meta = {
-            "model": settings.whisper_model,
+            "model": tx.resolve_model(settings),
+            "backend": tx.resolve_backend(settings),
             "device": getattr(transcriber, "device", None),
             "compute_type": getattr(transcriber, "compute_type", None),
             "language": language,

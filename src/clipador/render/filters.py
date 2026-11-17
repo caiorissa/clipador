@@ -201,6 +201,13 @@ def encoder_args(encoder: str, preview: bool = False) -> list[str]:
             v = ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq",
                  "21", "-b:v", "0", "-maxrate", "14M", "-bufsize", "28M",
                  "-profile:v", "high"]  # fmt: skip
+    elif encoder == "h264_videotoolbox":
+        # Apple media engine. -q:v (constant quality, Apple Silicon) keeps detail in fast game
+        # scenes better than a fixed bitrate at about the same size.
+        if preview:
+            v = ["-c:v", "h264_videotoolbox", "-q:v", "45", "-prio_speed", "1"]
+        else:
+            v = ["-c:v", "h264_videotoolbox", "-q:v", "62", "-profile:v", "high"]
     elif preview:
         v = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"]
     else:

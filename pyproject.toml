@@ -23,6 +23,9 @@ dependencies = [
     # CUDA runtime libs for ctranslate2 (GPU Whisper) without a system-wide CUDA/cuDNN install.
     "nvidia-cublas-cu12; sys_platform != 'darwin'",
     "nvidia-cudnn-cu12>=9,<10; sys_platform != 'darwin'",
+    # Apple Silicon: Whisper on the GPU (Metal) through MLX. faster-whisper has no Metal backend
+    # (CPU only on a Mac), so this is the fast path there.
+    "mlx-whisper>=0.4; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 [project.scripts]

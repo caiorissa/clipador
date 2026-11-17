@@ -65,7 +65,17 @@ def resolve_encoder(settings: Settings) -> str:
         return ffmpeg.X264
     if settings.render_encoder == "nvenc":
         return ffmpeg.NVENC
+    if settings.render_encoder == "videotoolbox":
+        return ffmpeg.VIDEOTOOLBOX
     return _auto_encoder(settings.ffmpeg_path)
+
+
+def hwaccel_args(settings: Settings) -> list[str]:
+    """Optional hardware DECODING of the source (CLIPADOR_RENDER_HWACCEL). Frames come back to
+    system memory, so the filters are unchanged. Off by default: measured on an M4, the copy
+    back cost as much as it saved (the filters are the bottleneck, not the decoder)."""
+    mode = settings.render_hwaccel.strip()
+    return [] if mode in ("none", "") else ["-hwaccel", mode]
 
 
 def fonts_dir(settings: Settings) -> Path:
@@ -288,8 +298,8 @@ def build_args(plan: RenderPlan, settings: Settings, encoder: str, audio_filter:
         filters.Zoom(plan.zoom_peak, settings.zoom_amount), audio_filter,
         rect=plan.rect, opts=plan.opts, out_size=out_size(settings, plan.kind),
     )  # fmt: skip
-    return ["-ss", f"{plan.start:.3f}", "-t", f"{plan.duration:.3f}", "-i", str(plan.video),
-            "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
+    return [*hwaccel_args(settings), "-ss", f"{plan.start:.3f}", "-t", f"{plan.duration:.3f}",
+            "-i", str(plan.video), "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
             *filters.output_rate_args(
                 plan.fps, 30 if plan.kind == RenderKind.PREVIEW else settings.render_max_fps
             ),
@@ -299,7 +309,8 @@ def build_args(plan: RenderPlan, settings: Settings, encoder: str, audio_filter:
 
 def run_encode(args_for, settings: Settings, encoder: str, plan: RenderPlan, work: Path,
                progress_cb, log) -> str:  # fmt: skip
-    """Run ffmpeg; on an NVENC failure retry once with libx264. Returns the encoder used."""
+    """Run ffmpeg; on a hardware encoder failure (NVENC/VideoToolbox) retry once with libx264.
+    Returns the encoder used."""
     try:
         ffmpeg.run_with_progress(
             args_for(encoder), duration=plan.duration, progress_cb=progress_cb, cwd=work,
@@ -307,9 +318,9 @@ def run_encode(args_for, settings: Settings, encoder: str, plan: RenderPlan, wor
         )  # fmt: skip
         return encoder
     except ToolError as e:
-        if encoder != ffmpeg.NVENC:
+        if encoder not in ffmpeg.HW_ENCODERS:
             raise
-        log(f"NVENC falhou ({(e.detail or '')[-160:]}); tentando de novo com libx264 (CPU).")
+        log(f"{encoder} falhou ({(e.detail or '')[-160:]}); tentando de novo com libx264 (CPU).")
         ffmpeg.run_with_progress(
             args_for(ffmpeg.X264), duration=plan.duration, progress_cb=progress_cb, cwd=work,
             ffmpeg=settings.ffmpeg_path, error_message="Falha ao renderizar o corte.",

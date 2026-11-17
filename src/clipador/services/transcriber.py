@@ -2,14 +2,21 @@
 
 Tests use a fake Transcriber; nothing here needs a GPU or model unless FasterWhisperTranscriber
 is actually used.
+
+Backends: faster-whisper (CUDA on the Windows/Linux PC, CPU fallback) and mlx-whisper (GPU of
+Apple Silicon Macs). `make_transcriber` picks the right one (CLIPADOR_WHISPER_BACKEND=auto).
 """
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import gzip
+import importlib.util
 import json
 import logging
+import platform
+import sys
 import time
 import unicodedata
 from collections.abc import Callable
@@ -168,7 +175,7 @@ class FasterWhisperTranscriber:
                     f"lento (horas para uma live longa). Detalhe: {status}"
                 )
         self.log_cb(
-            f"Carregando modelo '{self.settings.whisper_model}' ({self.device}, "
+            f"Carregando modelo '{resolve_model(self.settings, 'faster-whisper')}' ({self.device}, "
             f"{self.compute_type})… na primeira vez ele é baixado."
         )
         try:
@@ -176,7 +183,7 @@ class FasterWhisperTranscriber:
 
             self.settings.models_dir.mkdir(parents=True, exist_ok=True)
             self.model = WhisperModel(
-                self.settings.whisper_model,
+                resolve_model(self.settings, "faster-whisper"),
                 device=self.device,
                 compute_type=self.compute_type,
                 download_root=str(self.settings.models_dir),
@@ -221,8 +228,186 @@ class FasterWhisperTranscriber:
         gc.collect()
 
 
+# --- MLX (Apple Silicon GPU) ----------------------------------------------------------------
+
+# Short names (same as faster-whisper's) -> MLX weights on the Hugging Face hub.
+MLX_REPOS = {
+    "tiny": "mlx-community/whisper-tiny",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-mlx",
+    "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+
+def is_apple_silicon() -> bool:
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def mlx_available() -> bool:
+    return is_apple_silicon() and importlib.util.find_spec("mlx_whisper") is not None
+
+
+def resolve_backend(settings: Settings) -> str:
+    """'mlx' (Apple Silicon GPU) or 'faster-whisper' (CUDA on the PC, CPU elsewhere)."""
+    want = settings.whisper_backend
+    if want == "mlx":
+        if not mlx_available():
+            raise ClipadorError(
+                "CLIPADOR_WHISPER_BACKEND=mlx só funciona num Mac com Apple Silicon (M1/M2/M3/M4) "
+                "com o pacote mlx-whisper instalado (`uv sync`)."
+            )
+        return "mlx"
+    if want == "faster-whisper":
+        return "faster-whisper"
+    return "mlx" if mlx_available() else "faster-whisper"
+
+
+def resolve_model(settings: Settings, backend: str | None = None) -> str:
+    """'auto' = the best model that is fast on this machine: large-v3-turbo on Apple Silicon
+    (MLX), medium with faster-whisper (measured on an 8 GB RTX 5060)."""
+    if settings.whisper_model != "auto":
+        return settings.whisper_model
+    backend = backend or resolve_backend(settings)
+    return "large-v3-turbo" if backend == "mlx" else "medium"
+
+
+def mlx_repo(model: str) -> str:
+    if "/" in model:  # already a hub repo or a local folder
+        return model
+    if model not in MLX_REPOS:
+        raise ClipadorError(
+            f"Modelo Whisper '{model}' não existe para MLX. Use um destes: "
+            + ", ".join(sorted(MLX_REPOS))
+            + " (ou um repositório mlx-community/...)."
+        )
+    return MLX_REPOS[model]
+
+
+def _mlx_module():
+    """The mlx_whisper.transcribe MODULE (the package re-exports a function with that name)."""
+    return importlib.import_module("mlx_whisper.transcribe")
+
+
+class _ProgressBar:
+    """Stand-in for tqdm.tqdm inside mlx_whisper: forwards progress (and lets the callback raise
+    to cancel the job)."""
+
+    def __init__(self, total=None, *_, callback: Callable[[float], None], **__):
+        self.total = max(1, int(total or 1))
+        self.n = 0
+        self.callback = callback
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def update(self, n=1):
+        self.n += n
+        self.callback(min(1.0, self.n / self.total))
+
+
+class MlxWhisperTranscriber:
+    """Whisper on the Apple Silicon GPU (Metal) through mlx-whisper. ~10-30x faster than
+    faster-whisper on the Mac CPU. MLX has no VAD filter, so long silences are guarded with
+    hallucination_silence_threshold instead."""
+
+    device = "mps"
+    compute_type = "float16"
+
+    def __init__(self, settings: Settings, log_cb: Callable[[str], None] = log.info):
+        self.settings = settings
+        self.log_cb = log_cb
+        self.model_name = resolve_model(settings, "mlx")
+        self.repo = mlx_repo(self.model_name)
+        self.model_path: str | None = None
+        self.detected_language: str | None = None
+
+    def _load(self) -> None:
+        if self.model_path is not None:
+            return
+        if Path(self.repo).is_dir():
+            self.model_path = self.repo
+            return
+        self.log_cb(
+            f"Carregando modelo '{self.model_name}' (MLX, GPU do Apple Silicon)… na primeira vez "
+            "ele é baixado."
+        )
+        try:
+            from huggingface_hub import snapshot_download
+
+            cache = self.settings.models_dir / "mlx"
+            cache.mkdir(parents=True, exist_ok=True)
+            self.model_path = snapshot_download(self.repo, cache_dir=str(cache))
+        except Exception as e:
+            raise _classify_gpu_error(e) from e
+
+    def transcribe(
+        self, audio_path: Path, language: str | None, progress_cb: Callable[[float], None]
+    ) -> list[Word]:
+        self._load()
+        mt = _mlx_module()
+        reader = WavReader(audio_path)
+        samples = reader.read(0, reader.duration).astype("float32", copy=False)
+        original_tqdm = mt.tqdm
+
+        class _Shim:
+            @staticmethod
+            def tqdm(*a, **k):
+                return _ProgressBar(*a, callback=progress_cb, **k)
+
+        mt.tqdm = _Shim
+        try:
+            result = mt.transcribe(
+                samples,
+                path_or_hf_repo=self.model_path,
+                language=language,
+                word_timestamps=True,
+                condition_on_previous_text=False,
+                verbose=False,
+                hallucination_silence_threshold=(2.0 if self.settings.whisper_vad_filter else None),
+            )
+        except ClipadorError:
+            raise
+        except Exception as e:
+            if type(e).__name__ in ("JobCanceled", "WorkerStopping"):
+                raise
+            raise _classify_gpu_error(e) from e
+        finally:
+            mt.tqdm = original_tqdm
+        self.detected_language = result.get("language")
+        words: list[Word] = []
+        for seg in result.get("segments", []):
+            for w in seg.get("words") or []:
+                text = str(w.get("word", "")).strip()
+                if text:
+                    words.append(
+                        Word(float(w["start"]), float(w["end"]), text,
+                             float(w.get("probability", 1.0)))
+                    )  # fmt: skip
+        progress_cb(1.0)
+        return words
+
+    def close(self) -> None:
+        """Free the model and MLX's buffer cache (unified memory goes back to Ollama/the OS)."""
+        with contextlib.suppress(Exception):
+            import mlx.core as mx
+
+            mt = _mlx_module()
+            mt.ModelHolder.model = None
+            mt.ModelHolder.model_path = None
+            gc.collect()
+            mx.clear_cache()
+
+
 def make_transcriber(settings: Settings, log_cb: Callable[[str], None]) -> Transcriber:
     """Factory used by the transcribe stage (tests monkeypatch this)."""
+    if resolve_backend(settings) == "mlx":
+        return MlxWhisperTranscriber(settings, log_cb)
     return FasterWhisperTranscriber(settings, log_cb)
 
 

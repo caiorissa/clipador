@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -45,8 +46,11 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://localhost:11434"
 
-    # --- transcription (faster-whisper) ---
-    whisper_model: str = "medium"  # also: large-v3-turbo, small, large-v3 (may not fit 8 GB)
+    # --- transcription (faster-whisper on CUDA/CPU, mlx-whisper on Apple Silicon) ---
+    whisper_backend: str = "auto"  # auto | faster-whisper | mlx (auto = mlx on an M1-M4 Mac)
+    # auto = large-v3-turbo on a Mac (MLX), medium with faster-whisper (fits an 8 GB GPU).
+    # Also: small, large-v3-turbo, large-v3 (may not fit 8 GB of VRAM).
+    whisper_model: str = "auto"
     # float16 on GPU; use int8_float16 if VRAM is tight. CPU fallback always uses int8.
     whisper_compute_type: str = "float16"
     whisper_device: str = "auto"  # auto | cuda | cpu
@@ -84,12 +88,18 @@ class Settings(BaseSettings):
     rank_low_standalone_threshold: int = 4
 
     # --- rendering ---
-    render_encoder: str = "auto"  # auto (NVENC if it really works, else libx264) | nvenc | x264
+    # auto = the hardware encoder if it really works (NVENC on the PC, VideoToolbox on a Mac),
+    # else libx264 | nvenc | videotoolbox | x264
+    render_encoder: str = "auto"
+    # Hardware decoding of the source: none (default; measured: no gain) | videotoolbox | cuda
+    render_hwaccel: str = "none"
     render_max_fps: int = 60  # output fps = source fps (VFR -> CFR), capped here
     render_style: str = "destaque_amarelo"
     zoom_amount: float = 0.12  # punch-in on the peak (0 = off)
     # False = renders wait for the single GPU lock like Whisper/Ollama (one GPU job at a time).
-    render_parallel_with_gpu_jobs: bool = False
+    # Default: False on the PC (NVENC shares the 8 GB of VRAM); True on a Mac, where VideoToolbox
+    # runs on the separate media engine and does not compete with Whisper/Ollama on the GPU.
+    render_parallel_with_gpu_jobs: bool = Field(default_factory=lambda: sys.platform == "darwin")
     caption_styles_path: Path | None = None  # default: <repo>/config/caption_styles.toml
     fonts_dir: Path | None = None  # default: <repo>/assets/fonts (embedded OFL font)
     # Safe zone (fractions of the 1920 px height): platform UI covers the bottom and the top.

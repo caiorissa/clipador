@@ -19,6 +19,16 @@ DISK_WARN_GB = 50
 DISK_FAIL_GB = 10
 
 
+IS_MAC = sys.platform == "darwin"
+FFMPEG_HINT = (
+    "No Mac: `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg` "
+    "(o ffmpeg do core do Homebrew vem sem libass, e as legendas falham)."
+    if IS_MAC
+    else "Baixe o build 'essentials' em https://www.gyan.dev/ffmpeg/builds/, extraia e coloque a "
+    "pasta bin no PATH (ou defina CLIPADOR_FFMPEG_PATH / CLIPADOR_FFPROBE_PATH)."
+)
+
+
 class CheckStatus(StrEnum):
     OK = "ok"
     WARN = "warn"
@@ -59,8 +69,7 @@ def check_binary(label: str, binary: str) -> CheckResult:
         label,
         CheckStatus.FAIL,
         f"'{binary}' não encontrado ou não executa.",
-        "Baixe o build 'essentials' em https://www.gyan.dev/ffmpeg/builds/, extraia e coloque a "
-        "pasta bin no PATH (ou defina CLIPADOR_FFMPEG_PATH / CLIPADOR_FFPROBE_PATH).",
+        FFMPEG_HINT,
     )
 
 
@@ -100,8 +109,13 @@ def check_js_runtime() -> CheckResult:
         name,
         CheckStatus.WARN,
         "Deno não encontrado: no YouTube o yt-dlp pode não achar todos os formatos (ex.: 1080p).",
-        "Instale o Deno no PowerShell: `irm https://deno.land/install.ps1 | iex` e reabra o "
-        "terminal. Twitch e Kick não precisam dele.",
+        (
+            "Instale com `brew install deno`."
+            if IS_MAC
+            else "Instale o Deno no PowerShell: `irm https://deno.land/install.ps1 | iex` e reabra o "
+            "terminal."
+        )
+        + " Twitch e Kick não precisam dele.",
     )
 
 
@@ -127,7 +141,37 @@ def check_cookies(settings: Settings) -> CheckResult:
     )
 
 
+def _sysctl(key: str) -> str:
+    try:
+        return subprocess.run(["sysctl", "-n", key], capture_output=True, text=True,
+                              timeout=10).stdout.strip()  # fmt: skip
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def check_apple_gpu() -> CheckResult:
+    chip = _sysctl("machdep.cpu.brand_string") or platform.machine()
+    try:
+        mem_gb = int(_sysctl("hw.memsize")) / 1024**3
+    except ValueError:
+        mem_gb = 0
+    if platform.machine() != "arm64":
+        return CheckResult(
+            "GPU (Mac)", CheckStatus.WARN, f"{chip}: Mac Intel, sem GPU para o Whisper",
+            "A transcrição roda na CPU (lenta). Um Mac M1 ou mais novo usa a GPU (MLX).",
+        )  # fmt: skip
+    detail = f"{chip} · {mem_gb:.0f} GB de memória unificada (GPU via Metal/MLX)"
+    if mem_gb and mem_gb < 16:
+        return CheckResult(
+            "GPU (Mac)", CheckStatus.WARN, detail,
+            "Com menos de 16 GB, use CLIPADOR_WHISPER_MODEL=small e um LLM de ~3-4B no Ollama.",
+        )  # fmt: skip
+    return CheckResult("GPU (Mac)", CheckStatus.OK, detail)
+
+
 def check_gpu() -> CheckResult:
+    if IS_MAC:
+        return check_apple_gpu()
     if not shutil.which("nvidia-smi"):
         return CheckResult(
             "GPU NVIDIA",
@@ -161,18 +205,23 @@ def check_gpu() -> CheckResult:
     return CheckResult("GPU NVIDIA", CheckStatus.OK, "; ".join(gpus))
 
 
-def check_nvenc(settings: Settings) -> CheckResult:
-    ok, err = ffmpeg.try_encoder(ffmpeg.NVENC, settings.ffmpeg_path)
+def check_hw_encoder(settings: Settings) -> CheckResult:
+    """The hardware H.264 encoder of this machine: NVENC on the PC, VideoToolbox on a Mac."""
+    enc = ffmpeg.hw_encoder_candidates()[0]
+    label = "Encoder VideoToolbox" if enc == ffmpeg.VIDEOTOOLBOX else "Encoder NVENC"
+    ok, err = ffmpeg.try_encoder(enc, settings.ffmpeg_path)
     if ok:
-        return CheckResult(
-            "Encoder NVENC", CheckStatus.OK, "h264_nvenc funcionando (teste de encode de 0,2 s)"
-        )
+        return CheckResult(label, CheckStatus.OK, f"{enc} funcionando (teste de encode de 0,2 s)")
     return CheckResult(
-        "Encoder NVENC",
+        label,
         CheckStatus.WARN,
-        f"h264_nvenc indisponível: {err}. A renderização vai usar libx264 (CPU, mais lento).",
+        f"{enc} indisponível: {err}. A renderização vai usar libx264 (CPU, mais lento).",
+        FFMPEG_HINT if IS_MAC else
         "Atualize o driver NVIDIA e use um ffmpeg recente (build da gyan.dev).",
-    )
+    )  # fmt: skip
+
+
+check_nvenc = check_hw_encoder  # old name (tests / imports)
 
 
 def check_disk(settings: Settings) -> CheckResult:
@@ -257,8 +306,7 @@ def check_render_filters(settings: Settings) -> CheckResult:
             CheckStatus.FAIL,
             "faltam filtros: " + ", ".join(missing)
             + (" (sem libass: legendas não podem ser queimadas)" if "subtitles" in missing else ""),
-            "Use o build 'full' ou 'essentials' da gyan.dev (https://www.gyan.dev/ffmpeg/builds/), "
-            "que inclui libass.",
+            FFMPEG_HINT,
         )  # fmt: skip
     return CheckResult(
         name, CheckStatus.OK, "libass (legendas) e " + ", ".join(REQUIRED_FILTERS[1:])
@@ -315,6 +363,40 @@ def check_faster_whisper() -> CheckResult:
     return CheckResult("faster-whisper", CheckStatus.OK, f"faster-whisper {fw} · ctranslate2 {ct2}")
 
 
+def check_mlx_whisper(settings: Settings) -> CheckResult:
+    from clipador.errors import ClipadorError
+    from clipador.services import transcriber as tx
+
+    name = "Whisper na GPU (MLX)"
+    try:
+        backend = tx.resolve_backend(settings)
+    except ClipadorError as e:
+        return CheckResult(name, CheckStatus.FAIL, e.message)
+    if backend != "mlx":
+        if not tx.is_apple_silicon():
+            return CheckResult(
+                name, CheckStatus.WARN, "Mac Intel: transcrição na CPU (faster-whisper, int8)."
+            )
+        if settings.whisper_backend == "faster-whisper":
+            return CheckResult(
+                name, CheckStatus.WARN,
+                "CLIPADOR_WHISPER_BACKEND=faster-whisper: transcrição na CPU (2-3x mais lenta).",
+                "Remova a variável (ou use `auto`) para usar a GPU do Mac.",
+            )  # fmt: skip
+        return CheckResult(name, CheckStatus.FAIL, "mlx-whisper não instalado.", "Rode `uv sync`.")
+    from importlib.metadata import version
+
+    return CheckResult(
+        name, CheckStatus.OK,
+        f"mlx-whisper {version('mlx-whisper')} · mlx {version('mlx')} · modelo "
+        f"'{tx.resolve_model(settings, 'mlx')}' (meça com `clipador bench-transcribe`)",
+    )  # fmt: skip
+
+
+def check_whisper_accel(settings: Settings) -> CheckResult:
+    return check_mlx_whisper(settings) if IS_MAC else check_cuda_whisper(settings)
+
+
 def check_cuda_whisper(settings: Settings) -> CheckResult:
     from clipador.services.cuda import CUDA_LIBS_HINT, cuda_status
 
@@ -341,8 +423,14 @@ def check_cuda_whisper(settings: Settings) -> CheckResult:
         name,
         CheckStatus.OK,
         f"{st.device_count} GPU(s) visível(is) · cuBLAS/cuDNN ok · modelo "
-        f"'{settings.whisper_model}' ({settings.whisper_compute_type})",
+        f"'{_fw_model(settings)}' ({settings.whisper_compute_type})",
     )
+
+
+def _fw_model(settings: Settings) -> str:
+    from clipador.services.transcriber import resolve_model
+
+    return resolve_model(settings, "faster-whisper")
 
 
 def check_vram_free() -> CheckResult:
@@ -375,8 +463,13 @@ def check_twitch_downloader(settings: Settings) -> CheckResult:
     exe = shutil.which(configured) or (configured if Path(configured).is_file() else None)
     hint = (
         "Baixe em https://github.com/lay295/TwitchDownloader/releases (TwitchDownloaderCLI-…-"
-        "Windows-x64.zip), extraia e defina CLIPADOR_TWITCH_DOWNLOADER_PATH no .env com o caminho "
-        "do .exe. Sem ele, VODs da Twitch são analisados sem o sinal de chat."
+        + (
+            "MacOS-Arm64.zip; depois `xattr -d com.apple.quarantine` no binário"
+            if IS_MAC
+            else "Windows-x64.zip"
+        )
+        + "), extraia e defina CLIPADOR_TWITCH_DOWNLOADER_PATH no .env com o caminho "
+        "do executável. Sem ele, VODs da Twitch são analisados sem o sinal de chat."
     )
     if not exe:
         return CheckResult(name, CheckStatus.WARN, f"não encontrado ('{configured}').", hint)
@@ -418,13 +511,13 @@ def run_all(settings: Settings) -> list[CheckResult]:
         check_js_runtime(),
         check_cookies(settings),
         check_gpu(),
-        check_nvenc(settings),
+        check_hw_encoder(settings),
         check_render_filters(settings),
         check_fonts(settings),
         check_clips_space(settings),
         check_faster_whisper(),
-        check_cuda_whisper(settings),
-        check_vram_free(),
+        check_whisper_accel(settings),
+        *([] if IS_MAC else [check_vram_free()]),  # unified memory: no separate VRAM
         check_models_dir(settings),
         check_twitch_downloader(settings),
         check_disk(settings),

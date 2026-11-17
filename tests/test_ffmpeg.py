@@ -12,14 +12,36 @@ def _completed(returncode: int, stderr: str = "") -> subprocess.CompletedProcess
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr=stderr)
 
 
-def test_pick_encoder_uses_nvenc_when_test_encode_succeeds():
+@pytest.fixture
+def on_pc(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "win32")
+
+
+@pytest.fixture
+def on_mac(monkeypatch):
+    monkeypatch.setattr(ffmpeg.sys, "platform", "darwin")
+
+
+def test_pick_encoder_uses_nvenc_when_test_encode_succeeds(on_pc):
     with mock.patch("subprocess.run", return_value=_completed(0)) as run:
         assert ffmpeg.pick_encoder() == "h264_nvenc"
     cmd = run.call_args.args[0]
     assert "h264_nvenc" in cmd and "-t" in cmd and "0.2" in cmd
 
 
-def test_pick_encoder_falls_back_when_nvenc_fails_to_open():
+def test_pick_encoder_uses_videotoolbox_on_a_mac(on_mac):
+    with mock.patch("subprocess.run", return_value=_completed(0)) as run:
+        assert ffmpeg.pick_encoder() == "h264_videotoolbox"
+    assert "h264_videotoolbox" in run.call_args.args[0]
+
+
+def test_pick_encoder_mac_falls_back_to_x264(on_mac):
+    err = "[h264_videotoolbox @ 0x1] Error: cannot create compression session: -12908"
+    with mock.patch("subprocess.run", return_value=_completed(1, err)):
+        assert ffmpeg.pick_encoder() == "libx264"
+
+
+def test_pick_encoder_falls_back_when_nvenc_fails_to_open(on_pc):
     err = "[h264_nvenc @ 0x1] Cannot load nvcuda.dll\nError while opening encoder"
     with mock.patch("subprocess.run", return_value=_completed(1, err)):
         assert ffmpeg.pick_encoder() == "libx264"

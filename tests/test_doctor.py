@@ -14,7 +14,7 @@ def test_missing_ffmpeg_fails_with_hint():
     with mock.patch("clipador.services.ffmpeg.tool_version", return_value=None):
         r = doctor.check_binary("ffmpeg", "ffmpeg")
     assert r.status == CheckStatus.FAIL
-    assert "PATH" in r.hint
+    assert "PATH" in r.hint or "brew install" in r.hint
 
 
 def test_nvenc_unavailable_is_warning(settings):

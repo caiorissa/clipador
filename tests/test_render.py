@@ -205,6 +205,11 @@ def test_encoder_fallback_nvenc_to_x264(monkeypatch, settings):
                                 lambda f: None, lambda m: None)  # fmt: skip
     assert used == "libx264" and calls == [["-c:v", "h264_nvenc"], ["-c:v", "libx264"]]
 
+    calls.clear()
+    used = rendering.run_encode(lambda enc: ["-c:v", enc], settings, ffmpeg.VIDEOTOOLBOX, plan,
+                                None, lambda f: None, lambda m: None)  # fmt: skip
+    assert used == "libx264" and calls[0] == ["-c:v", "h264_videotoolbox"]
+
     def always_fail(*a, **k):
         raise ToolError("x")
 

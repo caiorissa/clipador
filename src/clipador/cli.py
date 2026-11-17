@@ -190,7 +190,7 @@ def cmd_bench_transcribe(settings: Settings, args) -> int:
     from pathlib import Path
 
     from clipador.services import audio
-    from clipador.services.transcriber import FasterWhisperTranscriber
+    from clipador.services.transcriber import make_transcriber, resolve_model
 
     src = Path(args.audio)
     if not src.is_file():
@@ -223,7 +223,7 @@ def cmd_bench_transcribe(settings: Settings, args) -> int:
                 stop.wait(0.5)
 
         threading.Thread(target=poll_vram, daemon=True).start()
-        tr = FasterWhisperTranscriber(settings, print)
+        tr = make_transcriber(settings, print)
         lang = None if settings.language == "auto" else settings.language
         t0 = time.monotonic()
         tr._load()
@@ -234,7 +234,7 @@ def cmd_bench_transcribe(settings: Settings, args) -> int:
         stop.set()
         tr.close()
     print(
-        f"\nmodelo={settings.whisper_model} compute={tr.compute_type} device={tr.device} "
+        f"\nmodelo={resolve_model(settings)} compute={tr.compute_type} device={tr.device} "
         f"idioma={tr.detected_language}\n"
         f"áudio: {dur / 60:.1f} min · carga do modelo: {t_load:.1f}s · transcrição: {t_tx:.1f}s · "
         f"{len(words)} palavras\n"
@@ -281,7 +281,13 @@ def cmd_render_bench(settings: Settings, args) -> int:
 
     settings.ensure_dirs()
     encoders = [e.strip() for e in args.encoders.split(",") if e.strip()]
-    encoders = [{"nvenc": "h264_nvenc", "x264": "libx264"}.get(e, e) for e in encoders]
+    from clipador.services import ffmpeg as ff
+
+    aliases = {"nvenc": ff.NVENC, "videotoolbox": ff.VIDEOTOOLBOX, "vt": ff.VIDEOTOOLBOX,
+               "x264": ff.X264}  # fmt: skip
+    if args.encoders == "auto":  # this machine's hardware encoder + the CPU one
+        encoders = [*ff.hw_encoder_candidates(), ff.X264]
+    encoders = [aliases.get(e, e) for e in encoders]
     with tempfile.TemporaryDirectory(dir=settings.tmp_dir) as tmp:
         if args.candidate_id is None:
             print(f"Sem candidato: gerando um vídeo de teste 1080p60 de {args.seconds:.0f}s…")
@@ -337,7 +343,11 @@ def main(argv: list[str] | None = None) -> int:
     fc.add_argument("--nao-salvar", action="store_true", help="só mostra, não salva no streamer")
     rb = sub.add_parser("render-bench", help="mede a velocidade do render (prévia e final)")
     rb.add_argument("candidate_id", type=int, nargs="?", help="sem id: usa um vídeo de teste")
-    rb.add_argument("--encoders", default="nvenc,x264")
+    rb.add_argument(
+        "--encoders",
+        default="auto",
+        help="auto (padrão: o da máquina + libx264) ou lista: nvenc,videotoolbox,x264",
+    )
     rb.add_argument("--seconds", type=float, default=40.0, help="duração do vídeo de teste")
     lb = sub.add_parser("llm-bench", help="mede velocidade/JSON/VRAM de modelos do Ollama")
     lb.add_argument("--source", type=int, help="fonte analisada para amostrar candidatos")

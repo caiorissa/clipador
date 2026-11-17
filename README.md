@@ -40,11 +40,12 @@ Para o chat da Twitch, baixe o **TwitchDownloaderCLI** em
 **Palavras de empolgação:** edite `data/hype_words.toml` (criado na primeira análise). Mudar o
 arquivo faz a próxima reanálise recalcular as features (rápido; não retranscreve).
 
-**Modelo do Whisper** (`.env`), medido numa RTX 5060 8 GB com 10 min de fala:
+**Modelo do Whisper** (`.env`; o padrão `auto` usa `medium` no PC e `large-v3-turbo` no Mac),
+medido numa RTX 5060 8 GB com 10 min de fala:
 
 | `CLIPADOR_WHISPER_MODEL` | `CLIPADOR_WHISPER_COMPUTE_TYPE` | velocidade | por hora de VOD | pico de VRAM* |
 |---|---|---|---|---|
-| `medium` (padrão) | `float16` | 21x | ~2,8 min | 3,2 GB |
+| `medium` (padrão no PC) | `float16` | 21x | ~2,8 min | 3,2 GB |
 | `large-v3-turbo` | `int8_float16` | 39x | ~1,5 min | 2,1 GB |
 | `large-v3` | `float16` | 16x | ~3,8 min | 5,0 GB |
 
@@ -269,7 +270,39 @@ Na prévia, verde = caixa salva, amarelo = rosto, vermelho = tentativa rejeitada
 `CLIPADOR_FACECAM_AUTO_DETECT` (padrão `true`), `CLIPADOR_FACECAM_MODEL_DOWNLOAD` (`false` = só
 Haar, sem internet), `CLIPADOR_FACECAM_SAMPLES` (16).
 
-## Requisitos (Windows 11)
+## Requisitos
+
+Roda no **PC com Windows 11 + GPU NVIDIA** e no **Mac com Apple Silicon (M1–M4)**. O app escolhe
+sozinho o caminho rápido de cada máquina (`clipador doctor` mostra qual está em uso):
+
+| | PC (Windows + NVIDIA) | Mac (Apple Silicon) |
+|---|---|---|
+| Transcrição | faster-whisper na GPU (CUDA), `medium` | mlx-whisper na GPU (Metal), `large-v3-turbo` |
+| Render | NVENC (`h264_nvenc`) | VideoToolbox (`h264_videotoolbox`) |
+| IA local | Ollama na GPU (CUDA) | Ollama na GPU (Metal) |
+| Render junto com Whisper/IA | não (dividem os 8 GB de VRAM) | sim (o VideoToolbox usa o motor de mídia) |
+
+Sem GPU (ou num Mac Intel) tudo funciona na CPU, só que mais lento. Forçar um caminho:
+`CLIPADOR_WHISPER_BACKEND=faster-whisper|mlx`, `CLIPADOR_RENDER_ENCODER=nvenc|videotoolbox|x264`.
+
+**Medido num MacBook M4 (16 GB):** Whisper `large-v3-turbo` via MLX ~7–9x tempo real
+(~7–9 min por hora de VOD; na CPU com faster-whisper ficava ~3,5x); corte final 9:16 de 30 s em
+~8 s com VideoToolbox (libx264: ~17 s). Meça na sua máquina com `clipador bench-transcribe` e
+`clipador render-bench`.
+
+### Mac
+
+```bash
+brew install uv git deno
+brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg   # com libass
+brew install ollama          # opcional (IA local); depois: ollama serve & ollama pull qwen2.5:7b
+```
+
+O ffmpeg do core do Homebrew vem **sem libass** (as legendas falham); use o do tap acima. O
+`uv sync` instala o mlx-whisper só no Mac. Restaurar dados de outra máquina:
+`docs/RESTAURAR_NO_MAC.md`.
+
+### Windows 11
 
 1. **Python**: o projeto está fixado em **3.12** (`.python-version`), por compatibilidade com
    faster-whisper/ctranslate2. Não precisa instalar à mão: o `uv sync` baixa o 3.12 sozinho.

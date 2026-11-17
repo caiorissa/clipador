@@ -33,6 +33,8 @@ def settings(tmp_path: Path) -> Settings:
         facecam_auto_detect=False,
         facecam_model_download=False,
         auto_preview_top_n=0,
+        # Same transcription path on every OS (tests never load a real model anyway).
+        whisper_backend="faster-whisper",
     )
 
 

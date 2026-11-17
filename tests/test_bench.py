@@ -23,7 +23,7 @@ class FakeFW:
 @requires_ffmpeg
 def test_bench_transcribe_reports_speed(settings, synthetic_video, monkeypatch, capsys):
     monkeypatch.setattr("clipador.cli.get_settings", lambda: settings)
-    monkeypatch.setattr("clipador.services.transcriber.FasterWhisperTranscriber", FakeFW)
+    monkeypatch.setattr("clipador.services.transcriber.make_transcriber", FakeFW)
     with mock.patch("shutil.which", return_value=None):  # no nvidia-smi polling
         assert main(["bench-transcribe", str(synthetic_video), "--seconds", "2"]) == 0
     out = capsys.readouterr().out

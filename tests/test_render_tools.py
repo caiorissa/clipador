@@ -19,7 +19,8 @@ def test_render_filters_check_ok_and_missing_libass(settings):
     partial = subprocess.CompletedProcess([], 0, _filters_output(["overlay", "boxblur"]), "")
     with mock.patch("subprocess.run", return_value=partial):
         r = doctor.check_render_filters(settings)
-    assert r.status == CheckStatus.FAIL and "libass" in r.detail and "gyan.dev" in r.hint
+    assert r.status == CheckStatus.FAIL and "libass" in r.detail
+    assert "gyan.dev" in r.hint or "homebrew-ffmpeg" in r.hint
 
 
 def test_fonts_and_clips_space_checks(settings, tmp_path):
