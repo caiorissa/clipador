@@ -112,8 +112,8 @@ def check_js_runtime() -> CheckResult:
         (
             "Instale com `brew install deno`."
             if IS_MAC
-            else "Instale o Deno no PowerShell: `irm https://deno.land/install.ps1 | iex` e reabra o "
-            "terminal."
+            else "Instale o Deno no PowerShell: `irm https://deno.land/install.ps1 | iex` e "
+            "reabra o terminal."
         )
         + " Twitch e Kick não precisam dele.",
     )

@@ -88,6 +88,7 @@ def _apply_form(streamer: Streamer, form: dict[str, str]) -> None:
     streamer.default_caption_style = style or None
     streamer.show_credit = form.get("show_credit") == "on"
     streamer.show_opening_text = form.get("show_opening_text") == "on"
+    streamer.auto_watch = form.get("auto_watch") == "on"
     touch(streamer)
 
 

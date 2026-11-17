@@ -14,6 +14,7 @@
       {% set path = request.url.path %}
       <a href="/fontes" class="{{ 'active' if path.startswith('/fontes') }}">Fontes</a>
       <a href="/revisao" class="{{ 'active' if path.startswith('/revisao') }}">Revisão</a>
+      <a href="/ao-vivo" class="{{ 'active' if path.startswith('/ao-vivo') }}">Ao vivo <span id="live-badge" class="badge live small" hidden></span></a>
       <a href="/streamers"class="{{ 'active' if path.startswith('/streamers') }}">Streamers</a>
       <a href="/jobs" class="{{ 'active' if path.startswith('/jobs') }}">Jobs</a>
       <a href="/sistema" class="{{ 'active' if path.startswith('/sistema') }}">Sistema</a>
@@ -24,5 +25,49 @@
     {% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+  // Step 5E: menu counter of auto-clipped live candidates waiting for review, plus an opt-in
+  // sound + browser notification when a new one shows up. Never breaks if denied.
+  (function () {
+    const badge = document.getElementById("live-badge");
+    const btn = document.getElementById("live-notify-btn");
+    let last = null;
+    try { last = Number(localStorage.getItem("clipador-last-auto")) || null; } catch (e) {}
+    function beep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = 880; g.gain.value = 0.08;
+        o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.18);
+      } catch (e) {}
+    }
+    if (btn && "Notification" in window && Notification.permission === "default") {
+      btn.hidden = false;
+      btn.addEventListener("click", () => Notification.requestPermission().then(() => { btn.hidden = true; }));
+    }
+    async function poll() {
+      try {
+        const r = await fetch("/ao-vivo/alertas.json", {cache: "no-store"});
+        if (!r.ok) return;
+        const d = await r.json();
+        badge.hidden = !d.pending;
+        badge.textContent = d.pending || "";
+        if (d.latest_id && last !== null && d.latest_id > last) {
+          beep();
+          if ("Notification" in window && Notification.permission === "granted") {
+            const n = new Notification("Clipador: corte novo da live", {body: d.latest || "Abra a Revisão."});
+            n.onclick = () => { window.focus(); location.href = "/revisao?status=ao_vivo"; };
+          }
+        }
+        if (d.latest_id) {
+          last = Math.max(last || 0, d.latest_id);
+          try { localStorage.setItem("clipador-last-auto", String(last)); } catch (e) {}
+        } else if (last === null) { last = 0; }
+      } catch (e) {}
+    }
+    poll();
+    setInterval(poll, 15000);
+  })();
+  </script>
 </body>
 </html>

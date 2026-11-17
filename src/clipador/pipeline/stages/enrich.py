@@ -69,6 +69,17 @@ def queue_auto_previews(ctx: StageContext, run_id: int) -> None:
         ctx.log(f"Prévias fiéis dos {n} melhores na fila (job #{job.id}, prioridade baixa).")
 
 
+def live_auto_clip(s, settings, live_id: int | None) -> int:
+    """After the AI scored live candidates: clip the ones above the session's minimum."""
+    if not live_id:
+        return 0
+    from clipador.models import LiveSession
+    from clipador.pipeline.stages.live import apply_auto_clip
+
+    ls = s.get(LiveSession, live_id)
+    return len(apply_auto_clip(s, settings, ls)) if ls is not None else 0
+
+
 class EnrichStage(Stage):
     name = STAGE
     needs_gpu = True  # Ollama runs on the GPU: never alongside Whisper
@@ -102,10 +113,19 @@ class EnrichStage(Stage):
         overwrite = bool(payload.get("overwrite_edited"))
         game = source.game or settings.default_game
 
-        inp = DetectInputs(ctx)
-        words_full, _ = load_transcript(settings.abs_path(inp.transcript.files["transcript"]))
-        words = [(w.start, w.end, w.word) for w in words_full]
-        chat = load_chat(settings.abs_path(inp.chat.files["chat"])).messages if inp.chat else None
+        live_id = payload.get("live_session_id")
+        if live_id:  # a live: words/chat of the captured segments (no full transcript yet)
+            from clipador.services import live
+
+            words = [(a, b, w) for a, b, w, _p in live.load_words(settings, live_id)]
+            chat = live.session_chat(settings, live_id) or None
+        else:
+            inp = DetectInputs(ctx)
+            words_full, _ = load_transcript(settings.abs_path(inp.transcript.files["transcript"]))
+            words = [(w.start, w.end, w.word) for w in words_full]
+            chat = (
+                load_chat(settings.abs_path(inp.chat.files["chat"])).messages if inp.chat else None
+            )
         chat_delay = float(run.params.get("features", {}).get("chat_delay_s", 5.0))
         prompt = load_prompt(settings.prompts_path, settings.enrich_prompt)
         phash = params_hash({"run": run.id, "model": model, "prompt": prompt.version})
@@ -140,6 +160,7 @@ class EnrichStage(Stage):
                 existing = enrichments_for(s, [c.id for c in cands])
                 notes = [drafts_for(c, None, s) for c in cands if c.id not in existing]
                 rerank_run(s, s.get(AnalysisRun, run.id), settings)
+                live_auto_clip(s, settings, live_id)
                 s.commit()
             for note in filter(None, notes):
                 ctx.log(note)
@@ -255,7 +276,10 @@ class EnrichStage(Stage):
 
         with ctx.session() as s:
             rerank_run(s, s.get(AnalysisRun, run.id), settings)
+            clipped = live_auto_clip(s, settings, live_id)
             s.commit()
+        if clipped:
+            ctx.log(f"{clipped} candidato(s) da live acima da nota mínima: prévia na fila.")
         if not targets:
             queue_auto_previews(ctx, run.id)
         called = stats["ok"] + stats["failed"]

@@ -24,6 +24,7 @@ SOURCE_STATUS_LABELS = {
     SourceStatus.DOWNLOADING: "Baixando",
     SourceStatus.READY: "Pronto",
     SourceStatus.FAILED: "Falhou",
+    SourceStatus.LIVE: "Ao vivo",
 }
 JOB_STATUS_LABELS = {
     JobStatus.QUEUED: "Na fila",
@@ -40,8 +41,11 @@ JOB_TYPE_LABELS = {
     "extract_audio": "Extrair áudio",
     "fetch_chat": "Chat",
     "enrich": "IA (Ollama)",
+    "live_analyze": "Live: análise do segmento",
+    "live_finalize": "Live: montar o vídeo",
+    "compile_long": "Vídeo longo",
 }
-KIND_LABELS = {SourceKind.VOD: "VOD", SourceKind.CLIP: "Clip"}
+KIND_LABELS = {SourceKind.VOD: "VOD", SourceKind.CLIP: "Clip", SourceKind.LIVE: "Live"}
 
 
 def _dt(value: datetime | None) -> str:

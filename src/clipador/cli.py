@@ -85,6 +85,54 @@ def _engine(settings: Settings):
     return make_engine(settings)
 
 
+def cmd_live_capture(settings: Settings, args) -> int:
+    """Internal: the capture process of one live session (started by the web/worker)."""
+    from clipador.services.live_capture import run_capture
+
+    return run_capture(_engine(settings), settings, args.live_id)
+
+
+def cmd_live(settings: Settings, args) -> int:
+    """Start a live capture in THIS terminal (Ctrl+C stops it cleanly). With --simular a local
+    file is played as if it were a live, through the real pipeline (needs the worker)."""
+    from pathlib import Path
+
+    from sqlmodel import Session, select
+
+    from clipador.errors import ClipadorError
+    from clipador.models import Streamer
+    from clipador.services import live
+    from clipador.services.live_capture import run_capture
+
+    engine = _engine(settings)
+    defaults = live.LiveOptions.defaults(settings)
+    opts = live.LiveOptions(
+        args.segmento or (60 if args.simular else defaults.segment_seconds),
+        not args.sem_auto_clip, args.nota_minima if args.nota_minima is not None
+        else defaults.min_score, args.desde_o_inicio,
+    )  # fmt: skip
+    streamer_id = args.streamer
+    try:
+        with Session(engine, expire_on_commit=False) as s:
+            if args.simular and streamer_id is None:  # first authorized streamer
+                st = s.exec(select(Streamer).where(Streamer.permission_confirmed == True)).first()  # noqa: E712
+                streamer_id = st.id if st else None
+            ls = live.create_session(
+                s, settings, streamer_id=streamer_id, url=args.url,
+                sim_file=Path(args.simular) if args.simular else None,
+                sim_speed=args.velocidade, options=opts,
+            )  # fmt: skip
+            s.commit()
+    except ClipadorError as e:
+        print(e.message, file=sys.stderr)
+        return 1
+    if ls.warning:
+        print(f"Aviso: {ls.warning}")
+    print(f"Live #{ls.id} criada. Deixe o worker rodando (`clipador worker`) para analisar os "
+          "segmentos. Ctrl+C encerra a captura.")  # fmt: skip
+    return run_capture(engine, settings, ls.id)
+
+
 def cmd_dump(settings: Settings, args) -> int:
     from pathlib import Path
 
@@ -359,9 +407,28 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--model")
     b.add_argument("--compute")
     b.add_argument("--language", default="auto")
+    lc = sub.add_parser("live-capture", help="(interno) processo de captura de uma live")
+    lc.add_argument("live_id", type=int)
+    lv = sub.add_parser("live", help="grava e analisa uma live (ou simula uma com um arquivo)")
+    lv.add_argument("url", nargs="?", help="link do canal ao vivo (Twitch, Kick ou YouTube)")
+    lv.add_argument("--simular", metavar="ARQUIVO", help="toca um vídeo local como se fosse live")
+    lv.add_argument("--velocidade", type=float, default=1.0,
+                    help="simulação: vezes o tempo real (ex.: 10)")  # fmt: skip
+    lv.add_argument("--streamer", type=int, help="id do streamer (padrão: pelo canal do link)")
+    lv.add_argument("--segmento", type=int, help="segundos por segmento (padrão 300; simulação 60)")
+    lv.add_argument("--nota-minima", type=float, help="nota final para clipar sozinho (padrão 70)")
+    lv.add_argument("--sem-auto-clip", action="store_true", help="não gera prévias sozinho")
+    lv.add_argument("--desde-o-inicio", action="store_true",
+                    help="YouTube: grava a live desde o começo")  # fmt: skip
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.command == "live-capture":
+        return cmd_live_capture(settings, args)
+    if args.command == "live":
+        if not args.url and not args.simular:
+            parser.error("informe o link da live ou --simular ARQUIVO")
+        return cmd_live(settings, args)
     if args.command == "render-bench":
         return cmd_render_bench(settings, args)
     if args.command == "llm-bench":

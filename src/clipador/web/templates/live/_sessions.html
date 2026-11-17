@@ -1,0 +1,54 @@
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+{% if not rows %}
+  <div class="empty">Nenhuma live gravada ainda.</div>
+{% else %}
+<div class="table-wrap">
+<table class="jobs">
+  <thead><tr><th>#</th><th>Live</th><th>Status</th><th>Gravado</th><th>Segmentos</th><th>Cortes</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}{% set ls = r.ls %}{% set st = r.stats %}
+    <tr>
+      <td>{{ ls.id }}</td>
+      <td class="small">
+        {% if ls.active %}<span class="badge live">AO VIVO</span>{% endif %}
+        {% if r.source %}<span class="badge platform-{{ r.source.platform }}">{{ r.source.platform|platform_label }}</span>
+          <a href="/fontes/{{ r.source.id }}">{{ (r.source.title or r.source.url)[:70] }}</a>{% endif %}
+        {% if ls.sim_file %}<span class="badge muted">simulação {{ ls.sim_speed|round(1) }}x</span>{% endif %}
+        {% if ls.warning %}<div class="small muted">{{ ls.warning }}</div>{% endif %}
+      </td>
+      <td>
+        {% if ls.active %}
+          {% if st.dead %}<span class="status status-failed">sem sinal da captura</span>
+          {% elif ls.stop_requested %}<span class="status status-running">parando…</span>
+          {% else %}<span class="status status-running">{{ 'gravando' if ls.status == 'recording' else 'conectando' }}</span>{% endif %}
+          {% if st.heartbeat_age is not none %}<div class="small muted">sinal há {{ st.heartbeat_age|round|int }} s</div>{% endif %}
+        {% else %}
+          <span class="status status-{{ 'failed' if ls.status == 'failed' else 'done' }}">{{ 'falhou' if ls.status == 'failed' else 'encerrada' }}</span>
+          <div class="small muted">{{ ls.stopped_at|dt }}</div>
+        {% endif %}
+        {% if ls.error %}<div class="small error-text">{{ ls.error }}</div>{% endif %}
+        {% if ls.reconnects %}<div class="small muted">{{ ls.reconnects }} reconexão(ões)</div>{% endif %}
+      </td>
+      <td class="small">{{ st.captured_s|duration }}<div class="muted">em {{ r.wall|duration }}</div></td>
+      <td class="small">{{ st.segments }} fechados · {{ st.analyzed }} analisados
+        {% if st.pending %}· {{ st.pending }} na fila{% endif %}
+        {% if st.failed %}· <span class="error-text">{{ st.failed }} falharam</span>{% endif %}
+        {% if st.recording %}<div class="muted">gravando o segmento {{ st.recording.index }}</div>{% endif %}
+      </td>
+      <td class="small">{{ st.candidates }} candidatos
+        {% if st.auto_clipped %}<div><span class="badge auto">{{ st.auto_clipped }} acima de {{ ls.min_score|round|int }}</span></div>{% endif %}
+      </td>
+      <td class="actions">
+        {% if r.source %}<a class="btn small" href="/revisao?status=ao_vivo">Revisar</a>{% endif %}
+        {% if ls.active and not ls.stop_requested %}
+          <button class="btn small danger" hx-post="/ao-vivo/{{ ls.id }}/parar" hx-target="#live-sessions"
+                  hx-confirm="Parar de gravar a live #{{ ls.id }}?">Parar</button>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}

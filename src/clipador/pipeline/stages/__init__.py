@@ -9,6 +9,7 @@ from clipador.pipeline.stages.enrich import EnrichStage
 from clipador.pipeline.stages.extract_audio import ExtractAudioStage
 from clipador.pipeline.stages.fetch_chat import FetchChatStage
 from clipador.pipeline.stages.ingest import IngestStage
+from clipador.pipeline.stages.live import LiveAnalyzeStage, LiveFinalizeStage
 from clipador.pipeline.stages.render import CompileLongStage, RenderStage
 from clipador.pipeline.stages.transcribe import TranscribeStage
 
@@ -23,6 +24,8 @@ STAGES: dict[str, type[Stage]] = {
         EnrichStage,
         RenderStage,
         CompileLongStage,
+        LiveAnalyzeStage,
+        LiveFinalizeStage,
     )
 }
 

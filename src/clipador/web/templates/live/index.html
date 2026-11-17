@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Ao vivo{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Ao vivo</h1>
+  <button type="button" class="btn small" id="live-notify-btn" hidden>🔔 Avisar quando sair um corte</button>
+</div>
+<p class="muted">Grava a live em segmentos, analisa cada um assim que fecha e gera a prévia dos melhores
+  momentos sozinho. Nada é aprovado nem publicado: você decide na <a href="/revisao?status=ao_vivo">Revisão</a>.
+  O worker precisa estar rodando (<code>uv run clipador worker</code>).</p>
+
+<form method="post" action="/ao-vivo" class="card form">
+  <label>Link do canal ao vivo (Twitch, Kick ou YouTube)
+    <input name="url" required autocomplete="off" value="{{ form.get('url', '') }}"
+           placeholder="https://www.twitch.tv/canal · https://kick.com/canal · https://www.youtube.com/@canal/live">
+  </label>
+  <div class="grid4">
+    <label>Streamer
+      <select name="streamer_id">
+        <option value="">— pelo canal do link —</option>
+        {% for s in streamers %}
+          <option value="{{ s.id }}" {{ 'selected' if form.get('streamer_id') == s.id|string }}>
+            {{ s.display_name }}{{ '' if s.permission_confirmed else ' (sem autorização)' }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Segmento (s)
+      <input name="segment_seconds" type="number" min="10" max="1800" value="{{ defaults.segment_seconds }}">
+    </label>
+    <label>Nota mínima para clipar
+      <input name="min_score" type="number" min="0" max="100" step="1" value="{{ defaults.min_score|round|int }}">
+    </label>
+    <label class="check"><input type="checkbox" name="auto_clip" {{ 'checked' if defaults.auto_clip }}> Gerar prévia sozinho</label>
+  </div>
+  <label class="check small"><input type="checkbox" name="live_from_start" {{ 'checked' if defaults.live_from_start }}>
+    Desde o início da live (só YouTube; nas outras grava a partir de agora)</label>
+  <div class="form-actions"><button class="btn primary">Começar a gravar</button></div>
+</form>
+
+<div id="live-sessions" hx-get="/ao-vivo/sessoes" hx-trigger="every 3s" hx-swap="innerHTML">
+  {% include "live/_sessions.html" %}
+</div>
+<p class="small muted">Simular sem internet: <code>uv run clipador live --simular data\vods\1\video.mp4 --velocidade 10</code>.
+  Para gravar sozinho quando um streamer entrar ao vivo, ligue "Vigiar lives" no cadastro dele.</p>
+{% endblock %}

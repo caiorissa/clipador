@@ -76,6 +76,8 @@
     {% set show_opening = (form.get('show_opening_text') == 'on') if form else (streamer.show_opening_text if streamer else True) %}
     <label class="check"><input type="checkbox" name="show_credit" {{ 'checked' if show_credit }}> Mostrar crédito "via @…" no vídeo</label>
     <label class="check"><input type="checkbox" name="show_opening_text" {{ 'checked' if show_opening }}> Mostrar texto de abertura nos 2 primeiros segundos</label>
+    {% set auto_watch = (form.get('auto_watch') == 'on') if form else (streamer.auto_watch if streamer else False) %}
+    <label class="check"><input type="checkbox" name="auto_watch" {{ 'checked' if auto_watch }}> Vigiar lives: quando um canal dele entrar ao vivo, começar a gravar e clipar sozinho (verifica a cada ~2 min; só com autorização)</label>
 
     <h3 class="fc-title">Facecam</h3>
     {% set box = (streamer.facecam_box if streamer and streamer.facecam_box else [None, None, None, None]) %}

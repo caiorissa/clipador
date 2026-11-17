@@ -104,6 +104,9 @@ class _Reporter:
         return self.worker.stopping.is_set()
 
 
+LIVE_SUPERVISE_SECONDS = 10.0
+
+
 class Worker:
     def __init__(
         self,
@@ -141,10 +144,17 @@ class Worker:
                 self.worker_id,
                 self.settings.worker_concurrency,
             )
-            last_beat = last_recover = 0.0
+            last_beat = last_recover = last_live = 0.0
+            last_watch = time.monotonic() - self.settings.live_watch_interval_seconds + 15
             while not self.stopping.is_set():
                 started = self.tick()
                 now = time.monotonic()
+                if now - last_live >= LIVE_SUPERVISE_SECONDS:
+                    self._live_supervise()
+                    last_live = now
+                if now - last_watch >= self.settings.live_watch_interval_seconds:
+                    self._live_auto_watch()
+                    last_watch = now
                 if now - last_beat >= HEARTBEAT_SECONDS:
                     queue.heartbeat(self.engine, self.active_job_ids(), self.worker_id)
                     last_beat = now
@@ -159,6 +169,35 @@ class Worker:
         finally:
             self.shutdown()
             lock.release()
+
+    # --- live capture (step 5E) -----------------------------------------------------------------
+    def _live_supervise(self) -> None:
+        """Restart dead capture processes (or close their session)."""
+        from clipador.services import live
+
+        try:
+            for note in live.supervise(self.engine, self.settings):
+                log.info(note)
+        except Exception:
+            log.exception("Falha ao supervisionar as lives")
+
+    def _live_auto_watch(self) -> None:
+        """Streamers with auto_watch: start capturing when they go live. Runs in a thread (each
+        check is a yt-dlp call of a few seconds) and never twice at the same time."""
+        if getattr(self, "_watch_thread", None) is not None and self._watch_thread.is_alive():
+            return
+
+        def work():
+            from clipador.services import live
+
+            try:
+                for note in live.auto_watch(self.engine, self.settings):
+                    log.info(note)
+            except Exception:
+                log.exception("Falha ao verificar lives dos streamers")
+
+        self._watch_thread = threading.Thread(target=work, name="live-watch", daemon=True)
+        self._watch_thread.start()
 
     def shutdown(self, timeout: float = 20.0) -> None:
         self.stopping.set()

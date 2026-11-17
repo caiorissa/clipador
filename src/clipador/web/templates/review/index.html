@@ -76,6 +76,8 @@
         <span class="score" title="Nota final">{{ (c.final_score if c.final_score is not none else parts.final)|round|int }}</span>
         <span class="subscores small">detecção <strong>{{ c.score|round|int }}</strong> · IA {% if parts.llm is not none %}<strong>{{ parts.llm|round|int }}</strong>{% else %}—{% endif %}{% if parts.penalty %} · <span class="warn-text">−{{ parts.penalty|round|int }}</span>{% endif %}</span>
         <span class="badge">{{ status_labels.get(c.status, c.status) }}</span>
+        {% if c.live_session_id %}<span class="badge live" title="Encontrado durante a live">AO VIVO</span>{% endif %}
+        {% if c.auto_clipped %}<span class="badge auto" title="Passou da nota mínima da sessão: a prévia foi gerada sozinha (não foi aprovado)">clipado sozinho</span>{% endif %}
         {% if e and e.precisa_de_contexto %}<span class="badge warn">precisa de contexto</span>{% endif %}
       </div>
       <div class="small muted">

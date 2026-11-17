@@ -497,7 +497,9 @@ STATUS_FILTERS = {
     CandidateStatus.REJECTED: "Rejeitados",
     CandidateStatus.RENDERED: "Renderizados",
     "prontos": "Prontos para publicar (aprovado + verificações)",
+    "ao_vivo": "Ao vivo (pendentes das lives)",
 }
+PENDING_LIKE = ("pendentes", "ao_vivo")  # filters that walk suggested, then skipped
 
 
 @dataclass(frozen=True)
@@ -545,7 +547,7 @@ class ReviewFilters:
         """`ready` (ready_to_publish) is only needed for the 'prontos' filter."""
         if self.status == "todos":
             return True
-        if self.status == "pendentes":
+        if self.status in PENDING_LIKE:  # ao_vivo: scope() already kept only live candidates
             return status in PENDING_STATUSES
         if self.status == "prontos":
             return ready
@@ -586,10 +588,16 @@ def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
         q = q.where(Source.streamer_id == f.streamer_id)
     if f.platform:
         q = q.where(Source.platform == f.platform)
+    if f.status == "ao_vivo":
+        q = q.where(Candidate.live_session_id != None)  # noqa: E711
     cands = list(session.exec(q).all())
     if f.min_score is not None:
         cands = [c for c in cands if _score(c) >= f.min_score]
-    return sorted(cands, key=order_key(f.order))
+    key = order_key(f.order)
+    if f.order == "horario":
+        return sorted(cands, key=key)
+    # Live moments that crossed the auto-clip score go first: they are the urgent ones.
+    return sorted(cands, key=lambda c: (not c.auto_clipped, key(c)))
 
 
 def next_pending(
@@ -607,7 +615,7 @@ def next_pending(
         rotated = rotated[:-1]  # the one we just left goes last (only if nothing else)
     tiers = (
         [(CandidateStatus.SUGGESTED,), (CandidateStatus.SKIPPED,)]
-        if f.status == "pendentes"
+        if f.status in PENDING_LIKE
         else [None]
     )
     ready = ready_ids(session, items) if f.status == "prontos" else set()
@@ -627,7 +635,11 @@ def upcoming(session: Session, f: ReviewFilters, current_id: int | None, n: int)
     out: list[Candidate] = []
     seen = {current_id}
     after = current_id
-    probe = replace(f, status="pendentes") if f.status not in PENDING_STATUSES else f
+    probe = (
+        replace(f, status="pendentes")
+        if f.status not in PENDING_STATUSES and f.status not in PENDING_LIKE
+        else f
+    )
     for _ in range(n):
         c = next_pending(session, probe, after)
         if c is None or c.id in seen:

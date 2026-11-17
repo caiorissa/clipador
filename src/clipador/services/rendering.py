@@ -85,7 +85,10 @@ def fonts_dir(settings: Settings) -> Path:
 def transcript_words(engine: Engine, settings: Settings, source_id: int) -> list:
     art = get_artifact(engine, source_id, "transcribe")
     if art is None or "transcript" not in art.files:
-        return []
+        from clipador.services import live
+
+        with Session(engine) as s:  # a live: words of the transcribed segments
+            return live.source_words(s, settings, source_id) or []
     path = settings.abs_path(art.files["transcript"])
     if not path.is_file():
         return []
@@ -125,10 +128,18 @@ class RenderPlan:
     warnings: list[str] = field(default_factory=list)
     phash: str = ""
     params: dict[str, Any] = field(default_factory=dict)
+    # Live source: `video` is a window of captured segments starting at this global time.
+    seek_offset: float = 0.0
+    window: Any = None  # services.live.SegmentWindow (built lazily before encoding)
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    @property
+    def seek(self) -> float:
+        """Where the clip starts inside `video`."""
+        return self.start - self.seek_offset
 
 
 def out_size(settings: Settings, kind: str) -> tuple[int, int]:
@@ -141,10 +152,20 @@ def plan_render(
     session: Session, engine: Engine, settings: Settings, c: Candidate, kind: str = "final"
 ) -> RenderPlan:
     source = session.get(Source, c.source_id)
-    if source is None or not source.file_path:
+    if source is None:
+        raise ClipadorError("A fonte deste candidato não existe mais.")
+    window = None
+    if source.file_path and settings.abs_path(source.file_path).is_file():
+        video = settings.abs_path(source.file_path)
+    elif source.kind == "live" or source.is_live:
+        from clipador.services import live
+
+        # A live (still on, or without its joined VOD): read the captured segments.
+        window = live.segment_window(session, settings, source.id, c.eff_start, c.eff_end)
+        video = window.video
+    elif not source.file_path:
         raise ClipadorError("O vídeo desta fonte não está baixado.")
-    video = settings.abs_path(source.file_path)
-    if not video.is_file():
+    else:
         raise ClipadorError("Arquivo de vídeo da fonte não encontrado; baixe a fonte de novo.")
     streamer = session.get(Streamer, source.streamer_id)
     info = source.media_info or {}
@@ -212,11 +233,13 @@ def plan_render(
         "safe": [settings.safe_bottom, settings.safe_top, settings.caption_lift],
         "max_fps": settings.render_max_fps,
     }  # fmt: skip
+    if window is not None:
+        params["file"] = window.key
     name = f"{c.rank:02d}_{format_hms(start).replace(':', '')}"
     return RenderPlan(
         c.id, source.id, kind, video, start, end, src_w, src_h, fps, layout, style.key, words,
         rect if layout == "facecam_embaixo" else None, opts, peak, overlays, name, warnings,
-        params_hash(params), params,
+        params_hash(params), params, window.offset if window else 0.0, window,
     )  # fmt: skip
 
 
@@ -298,7 +321,7 @@ def build_args(plan: RenderPlan, settings: Settings, encoder: str, audio_filter:
         filters.Zoom(plan.zoom_peak, settings.zoom_amount), audio_filter,
         rect=plan.rect, opts=plan.opts, out_size=out_size(settings, plan.kind),
     )  # fmt: skip
-    return [*hwaccel_args(settings), "-ss", f"{plan.start:.3f}", "-t", f"{plan.duration:.3f}",
+    return [*hwaccel_args(settings), "-ss", f"{plan.seek:.3f}", "-t", f"{plan.duration:.3f}",
             "-i", str(plan.video), "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
             *filters.output_rate_args(
                 plan.fps, 30 if plan.kind == RenderKind.PREVIEW else settings.render_max_fps
@@ -344,11 +367,15 @@ def execute_render(
     tmp_out = work / "out.tmp.mp4"
     t0 = time.monotonic()
     try:
+        if plan.window is not None:  # live: join the needed segments once (cached, -c copy)
+            from clipador.services import live
+
+            live.ensure_window_video(plan.window, settings.ffmpeg_path)
         encoder = resolve_encoder(settings)
         gain = None
         if plan.kind == RenderKind.FINAL:
             gain = raudio.final_gain(
-                plan.video, plan.start, plan.duration, settings.loudness_target,
+                plan.video, plan.seek, plan.duration, settings.loudness_target,
                 settings.loudness_true_peak, settings.ffmpeg_path,
             )  # fmt: skip
         audio_filter = raudio.loudnorm_filter(

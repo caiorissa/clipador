@@ -19,6 +19,8 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
 - Passo 5B: editor de legenda palavra a palavra, glossário por streamer, verificações antes de
   publicar ("pronto para publicar") e calibração dos pesos com `clipador calibrate`.
 - Passo 5C: detecção automática da facecam (`clipador facecam`, "Detectar de novo").
+- Passo 5E: lives ao vivo (gravação em segmentos, análise incremental, clipagem automática com
+  prévia, aviso no navegador) e prévias automáticas dos melhores candidatos.
 
 ## Detecção de momentos (Passo 2)
 
@@ -269,6 +271,48 @@ uv run clipador facecam 3 --sobrescrever   # substitui também uma caixa marcada
 Na prévia, verde = caixa salva, amarelo = rosto, vermelho = tentativa rejeitada. Configuração:
 `CLIPADOR_FACECAM_AUTO_DETECT` (padrão `true`), `CLIPADOR_FACECAM_MODEL_DOWNLOAD` (`false` = só
 Haar, sem internet), `CLIPADOR_FACECAM_SAMPLES` (16).
+
+## Ao vivo (Passo 5E)
+
+A tela **`/ao-vivo`** grava uma live **enquanto ela acontece** e já sugere os cortes, para você
+revisar e postar rápido. Continua valendo: só streamers com autorização confirmada, e **nada é
+aprovado nem publicado sozinho**.
+
+1. Cole o link do canal (Twitch, Kick ou YouTube) e clique em **Começar a gravar**. Um processo
+   separado (`clipador live-capture`, não ocupa o worker) grava em segmentos (padrão 5 min, sem
+   reencodar), reconecta se o stream cair e para sozinho quando a live acaba, quando você clica
+   **Parar** ou se sobrar menos de 20 GB no disco.
+2. Cada segmento fechado vira um job `live_analyze`: áudio → Whisper → nota com uma **linha de
+   base rolante** dos últimos 30 min da sessão (a nota fica comparável ao longo da live) →
+   candidatos na linha do tempo da live, sem duplicar os que atravessam dois segmentos. Na
+   Twitch o **chat ao vivo** também entra (leitura anônima, sem login).
+3. Com o Ollama ligado, a IA avalia os novos candidatos. Quem passa da **nota mínima** da sessão
+   (padrão 70) ganha o selo **clipado sozinho** e a prévia fiel entra na fila na frente de tudo.
+   O menu "Ao vivo" mostra quantos estão esperando e o navegador avisa (som + notificação,
+   se você permitir). Na Revisão, o filtro **Ao vivo** traz esses primeiro.
+4. Quando a live termina, os segmentos são juntados num vídeo só e a fonte vira um VOD normal
+   (dá para clicar em Analisar para a análise completa).
+
+**Vigiar lives:** no cadastro do streamer, "Vigiar lives" faz o worker checar a cada ~2 min se
+um canal dele entrou ao vivo e começar a gravar sozinho (desligado por padrão).
+
+**YouTube desde o início:** marque "Desde o início" (só YouTube permite); nas outras plataformas
+grava a partir de agora.
+
+Testar sem internet (passa pelo pipeline real; deixe o worker rodando):
+
+```bash
+uv run clipador live --simular data/vods/1/video.mp4 --velocidade 10
+uv run clipador live https://www.twitch.tv/canal        # gravar uma live pelo terminal
+```
+
+Configurações (`.env`): `CLIPADOR_LIVE_SEGMENT_SECONDS`, `CLIPADOR_LIVE_MIN_SCORE`,
+`CLIPADOR_LIVE_MIN_FREE_GB`, `CLIPADOR_LIVE_RETENTION_HOURS` (segmentos analisados que não viraram
+corte são apagados depois disso), `CLIPADOR_LIVE_BASELINE_MINUTES`, `CLIPADOR_LIVE_TWITCH_CHAT`.
+
+Medido no M4: cada minuto de live leva ~7 s para ser transcrito e analisado, então a análise
+acompanha a live com folga. **Não validado ainda com live real** de cada plataforma (só
+simulação); se o yt-dlp não achar o stream, atualize-o (`uv lock --upgrade-package yt-dlp`).
 
 ## Requisitos
 
