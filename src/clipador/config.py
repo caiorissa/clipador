@@ -155,6 +155,13 @@ class Settings(BaseSettings):
     # OAuth client JSON ("Desktop app") from Google Cloud with the YouTube Data API v3 enabled.
     youtube_client_secrets: Path | None = None
     youtube_metrics_hours: float = 6.0  # refresh views/likes of published clips (0 = off)
+    # Auto-post: YouTube uploads go up to this many hours BEFORE their slot (private until
+    # the slot via publishAt), so they go public on time even with the PC off.
+    youtube_upload_lead_hours: float = 12.0
+    autopost_tick_seconds: float = 60.0
+    # TikTok app (developers.tiktok.com: Login Kit + Content Posting API).
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = ""
 
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala

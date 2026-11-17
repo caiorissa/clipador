@@ -498,10 +498,44 @@ class LiveSegment(SQLModel, table=True):
 
 
 class PublicationStatus(StrEnum):
+    SCHEDULED = "scheduled"  # waiting for its slot in the account's posting grid
+    HELD = "held"  # auto-post paused it (AI alert / music): needs "Liberar" by hand
     QUEUED = "queued"
     UPLOADING = "uploading"
     PUBLISHED = "published"  # uploaded (public, unlisted, private or scheduled)
     FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class SocialAccount(SQLModel, table=True):
+    """A connected YouTube channel / TikTok account. With `autopost`, clips of its streamers
+    that you APPROVE are posted by themselves on the account's time grid (never unapproved
+    ones). Credentials stay in this local DB (data/ is never in git)."""
+
+    __tablename__ = "social_account"
+    __table_args__ = (UniqueConstraint("platform", "external_id", name="uq_account_external"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    platform: str  # youtube | tiktok
+    name: str = ""
+    external_id: str = ""  # channel id / open_id
+    credentials: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    active: bool = True  # False = lost authorization / disconnected
+    paused: bool = False  # nothing is posted while paused (scheduled items wait)
+    autopost: bool = False
+    autopost_since: datetime | None = None  # only clips approved after this are auto-posted
+    streamer_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    slots: list[str] = Field(default_factory=lambda: ["12:00", "18:00", "21:00"],
+                             sa_column=Column(JSON, nullable=False))  # fmt: skip
+    post_now: bool = False  # True = post as soon as approved (respecting the daily cap)
+    max_per_day: int = 3
+    min_gap_minutes: int = 60
+    privacy: str = "public"  # generic: private | unlisted | public
+    hold_on_alerts: bool = True
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Publication(SQLModel, table=True):
@@ -512,7 +546,11 @@ class Publication(SQLModel, table=True):
     candidate_id: int = Field(foreign_key="candidate.id", index=True)
     render_id: int = Field(foreign_key="render.id")
     platform: str = "youtube"
+    account_id: int | None = Field(default=None, foreign_key="social_account.id", index=True)
     status: str = Field(default=PublicationStatus.QUEUED, index=True)
+    scheduled_for: datetime | None = Field(default=None, index=True)  # our slot (auto-post)
+    auto: bool = False  # created by auto-post (vs. "Publicar" clicked by hand)
+    hold_reason: str | None = None
     privacy: str = "private"  # private | unlisted | public
     publish_at: datetime | None = None  # scheduled (YouTube keeps it private until then)
     title: str = ""

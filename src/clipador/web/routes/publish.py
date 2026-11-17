@@ -1,5 +1,6 @@
-"""/publicar: connect YouTube (OAuth on this machine), upload approved clips by an explicit
-click, and see how the published ones are doing (step 6)."""
+"""/publicar: connected accounts (several YouTube channels, TikTok), their auto-post grid,
+the posting queue (scheduled / held / sending), history with numbers, and "Publicar" by hand
+for one approved clip (steps 6 and 6B)."""
 
 from __future__ import annotations
 
@@ -11,111 +12,343 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import Session, col, select
 
 from clipador.config import Settings
-from clipador.errors import ClipadorError
-from clipador.models import Candidate, Publication, Source, Streamer
-from clipador.services import publishing, youtube
+from clipador.errors import ClipadorError, ValidationError
+from clipador.models import (
+    Candidate,
+    Publication,
+    PublicationStatus,
+    SocialAccount,
+    Source,
+    Streamer,
+)
+from clipador.services import accounts, publishing, tiktok, youtube
+from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
 from clipador.worker import queue
 
 router = APIRouter()
 SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
-_PENDING_AUTH: dict[str, tuple[str, str]] = {}  # state -> (code verifier, redirect uri)
+_PENDING_AUTH: dict[str, tuple[str, str, str]] = {}  # state -> (platform, verifier, redirect)
+QUEUE_STATUSES = (
+    PublicationStatus.HELD,
+    PublicationStatus.SCHEDULED,
+    PublicationStatus.QUEUED,
+    PublicationStatus.UPLOADING,
+)
+
+
+def _setup_error(fn, settings) -> str | None:
+    try:
+        fn(settings)
+        return None
+    except ClipadorError as e:
+        return e.message
 
 
 def _ctx(session: Session, settings: Settings, cand_id: int | None) -> dict:
-    try:
-        youtube.load_client(settings)
-        configured, setup_error = True, None
-    except ClipadorError as e:
-        configured, setup_error = False, e.message
-    tok = youtube.load_token(settings) or {}
-    pubs = session.exec(select(Publication).order_by(col(Publication.id).desc()).limit(100)).all()
-    cands = {c.id: c for c in session.exec(select(Candidate).where(
-        col(Candidate.id).in_([p.candidate_id for p in pubs]))).all()}  # fmt: skip
-    chosen = session.get(Candidate, cand_id) if cand_id else None
+    accounts.import_legacy_youtube(session, settings)
+    session.commit()
+    accs = accounts.accounts(session)
+    pubs = session.exec(select(Publication).order_by(col(Publication.id).desc()).limit(300)).all()
+    queue_rows = sorted(
+        [p for p in pubs if p.status in QUEUE_STATUSES],
+        key=lambda p: (
+            p.status != PublicationStatus.HELD,
+            accounts.aware(p.scheduled_for) or utcnow(),
+        ),
+    )
+    history = [p for p in pubs if p.status not in QUEUE_STATUSES][:100]
+    cands = {
+        c.id: c
+        for c in session.exec(
+            select(Candidate).where(
+                col(Candidate.id).in_(
+                    {p.candidate_id for p in pubs} | ({cand_id} if cand_id else set())
+                )
+            )
+        ).all()
+    }
+    streamers = session.exec(select(Streamer).order_by(Streamer.display_name)).all()
     form = None
-    if chosen is not None:
-        d = publishing.youtube_draft(session, chosen.id)
-        src = session.get(Source, chosen.source_id)
+    if cand_id and cand_id in cands:
+        c = cands[cand_id]
+        src = session.get(Source, c.source_id)
         form = {
-            "candidate": chosen,
-            "draft": d,
+            "candidate": c,
             "source": src,
-            "streamer": session.get(Streamer, src.streamer_id) if src else None,
-            "render": publishing.final_render(session, settings, chosen.id),
+            "draft": publishing.youtube_draft(session, c.id),
+            "tiktok_draft": accounts.draft_for(session, c.id, "tiktok"),
+            "render": publishing.final_render(session, settings, c.id),
         }
-    total_views = sum(p.views or 0 for p in pubs)
-    return {"configured": configured, "setup_error": setup_error,
-            "connected": youtube.connected(settings), "channel": tok.get("channel"),
-            "pubs": pubs, "cands": cands, "form": form, "total_views": total_views,
-            "privacy_labels": youtube.PRIVACY_LABELS}  # fmt: skip
+    totals = {a.id: sum(p.views or 0 for p in pubs if p.account_id == a.id) for a in accs}
+    return {
+        "accs": accs,
+        "acc_by_id": {a.id: a for a in accs},
+        "queue_rows": queue_rows,
+        "history": history,
+        "cands": cands,
+        "streamers": streamers,
+        "streamer_names": {s.id: s.display_name for s in streamers},
+        "form": form,
+        "totals": totals,
+        "yt_error": _setup_error(youtube.load_client, settings),
+        "tt_error": _setup_error(tiktok.load_client, settings),
+        "privacy_labels": youtube.PRIVACY_LABELS,
+        "platform_labels": accounts.PLATFORM_LABELS,
+        "status_labels": {
+            "scheduled": "agendado",
+            "held": "segurado",
+            "queued": "na fila",
+            "uploading": "enviando",
+            "published": "publicado",
+            "failed": "falhou",
+            "canceled": "cancelado",
+        },
+        "tiktok_redirect": None,
+    }
+
+
+def _page(
+    request: Request,
+    session: Session,
+    settings: Settings,
+    cand_id=None,
+    status_code: int = 200,
+    **extra,
+):
+    ctx = _ctx(session, settings, cand_id)
+    ctx["tiktok_redirect"] = str(request.url_for("oauth_callback", platform="tiktok"))
+    ctx.update(extra)
+    return render(request, "publish/index.html", status_code=status_code, **ctx)
 
 
 @router.get("/publicar")
-def publish_page(request: Request, session: SessionDep, settings: SettingsDep,
-                 candidato: int | None = None):  # fmt: skip
-    return render(request, "publish/index.html", **_ctx(session, settings, candidato))
+def publish_page(
+    request: Request, session: SessionDep, settings: SettingsDep, candidato: int | None = None
+):
+    return _page(request, session, settings, candidato)
 
 
-@router.get("/publicar/youtube/conectar")
-def youtube_connect(request: Request, settings: SettingsDep):
+# --- connecting accounts ----------------------------------------------------------------------
+
+
+@router.get("/publicar/{platform}/conectar")
+def connect(request: Request, platform: str, settings: SettingsDep):
+    mod = {"youtube": youtube, "tiktok": tiktok}.get(platform)
+    if mod is None:
+        return redirect("/publicar", "Plataforma desconhecida.")
     try:
-        client = youtube.load_client(settings)
+        client = mod.load_client(settings)
     except ClipadorError as e:
         return redirect("/publicar", e.message)
-    verifier, challenge = youtube.new_pkce()
+    verifier, challenge = mod.new_pkce()
     state = secrets.token_urlsafe(24)
-    redirect_uri = str(request.url_for("youtube_callback"))
-    _PENDING_AUTH[state] = (verifier, redirect_uri)
-    return RedirectResponse(youtube.auth_url(client, redirect_uri, state, challenge), 303)
+    redirect_uri = str(request.url_for("oauth_callback", platform=platform))
+    _PENDING_AUTH[state] = (platform, verifier, redirect_uri)
+    return RedirectResponse(mod.auth_url(client, redirect_uri, state, challenge), 303)
 
 
-@router.get("/publicar/youtube/callback", name="youtube_callback")
-def youtube_callback(settings: SettingsDep, state: str = "", code: str = "", error: str = ""):
+@router.get("/publicar/{platform}/callback", name="oauth_callback")
+def oauth_callback(
+    platform: str,
+    session: SessionDep,
+    settings: SettingsDep,
+    state: str = "",
+    code: str = "",
+    error: str = "",
+):
     pending = _PENDING_AUTH.pop(state, None)
-    if error or pending is None or not code:
-        return redirect(
-            "/publicar", f"Conexão com o YouTube cancelada{f' ({error})' if error else ''}."
-        )
+    if error or pending is None or not code or pending[0] != platform:
+        why = f" ({error})" if error else ""
+        return redirect("/publicar", f"Conexão cancelada{why}.")
+    _p, verifier, redirect_uri = pending
     try:
-        tok = youtube.exchange_code(settings, code, pending[1], pending[0])
+        if platform == "tiktok":
+            tok = tiktok.exchange_code(settings, code, redirect_uri, verifier)
+            who = tok.pop("user")
+        else:
+            tok = youtube.exchange_code(settings, code, redirect_uri, verifier)
+            who = tok.pop("channel")
+        acc = accounts.upsert_account(session, platform, who["id"], who["title"], tok)
+        session.commit()
     except ClipadorError as e:
+        session.rollback()
         return redirect("/publicar", e.message)
-    ch = (tok.get("channel") or {}).get("title")
-    return redirect("/publicar", f"YouTube conectado{f': {ch}' if ch else ''}.")
+    return redirect(
+        "/publicar",
+        f"{accounts.PLATFORM_LABELS[platform]} conectado: {acc.name}. "
+        "Configure a postagem automática da conta abaixo.",
+    )
 
 
-@router.post("/publicar/youtube/desconectar")
-def youtube_disconnect(settings: SettingsDep):
-    youtube.disconnect(settings)
-    return redirect("/publicar", "YouTube desconectado (o token foi apagado deste computador).")
+# --- account settings -------------------------------------------------------------------------
+
+
+def _account(session: Session, acc_id: int) -> SocialAccount:
+    acc = session.get(SocialAccount, acc_id)
+    if acc is None:
+        raise ValidationError("Conta não encontrada.")
+    return acc
+
+
+@router.post("/publicar/contas/{acc_id}")
+async def save_account(request: Request, acc_id: int, session: SessionDep, settings: SettingsDep):
+    form = await request.form()
+    try:
+        acc = _account(session, acc_id)
+        autopost = form.get("autopost") == "on"
+        if autopost and not acc.autopost:
+            acc.autopost_since = utcnow()  # only clips approved from now on
+        acc.autopost = autopost
+        acc.paused = form.get("paused") == "on"
+        acc.post_now = form.get("post_now") == "on"
+        acc.hold_on_alerts = form.get("hold_on_alerts") == "on"
+        acc.slots = accounts.parse_slots(str(form.get("slots", "")))
+        acc.max_per_day = max(1, min(50, int(form.get("max_per_day") or 3)))
+        acc.min_gap_minutes = max(0, min(1440, int(form.get("min_gap_minutes") or 0)))
+        privacy = str(form.get("privacy", acc.privacy))
+        if privacy not in youtube.PRIVACY:
+            raise ValidationError("Visibilidade inválida.")
+        acc.privacy = privacy
+        acc.streamer_ids = sorted(int(v) for v in form.getlist("streamer_ids") if str(v).isdigit())
+        if not acc.slots and not acc.post_now:
+            raise ValidationError(
+                "Defina pelo menos um horário, ou marque 'postar assim que aprovar'."
+            )
+        acc.updated_at = utcnow()
+        session.add(acc)
+        session.commit()
+    except (ValidationError, ValueError) as e:
+        session.rollback()
+        return _page(
+            request,
+            session,
+            settings,
+            status_code=400,
+            error=getattr(e, "message", "Valor inválido."),
+        )
+    state = "ligada" if acc.autopost else "desligada"
+    return redirect("/publicar", f"{acc.name}: configuração salva (postagem automática {state}).")
+
+
+@router.post("/publicar/contas/{acc_id}/desconectar")
+def disconnect_account(acc_id: int, session: SessionDep):
+    acc = _account(session, acc_id)
+    acc.active, acc.autopost, acc.credentials = False, False, {}
+    session.add(acc)
+    for p in session.exec(
+        select(Publication).where(
+            Publication.account_id == acc_id,
+            col(Publication.status).in_([PublicationStatus.SCHEDULED, PublicationStatus.HELD]),
+        )
+    ):
+        p.status = PublicationStatus.CANCELED
+        session.add(p)
+    session.commit()
+    return redirect("/publicar", f"{acc.name} desconectada (token apagado; agendados cancelados).")
+
+
+@router.post("/publicar/pausar-tudo")
+def pause_all(session: SessionDep, pausar: Annotated[str, Form()] = "1"):
+    paused = pausar == "1"
+    for acc in accounts.accounts(session):
+        acc.paused = paused
+        session.add(acc)
+    session.commit()
+    return redirect("/publicar", "Todas as contas pausadas." if paused else "Contas retomadas.")
+
+
+# --- the queue --------------------------------------------------------------------------------
+
+
+@router.post("/publicar/fila/{pub_id}/{action}")
+def queue_action(
+    request: Request, pub_id: int, action: str, session: SessionDep, settings: SettingsDep
+):
+    try:
+        if action == "liberar":
+            p = accounts.release(session, settings, pub_id)
+            msg = f"Liberado: vai em {p.scheduled_for.astimezone():%d/%m %H:%M}."
+        elif action == "agora":
+            accounts.post_now(session, pub_id)
+            msg = "Vai ser enviado no próximo minuto (o worker precisa estar rodando)."
+        elif action == "cancelar":
+            accounts.cancel(session, pub_id)
+            msg = "Postagem cancelada."
+        else:
+            raise ValidationError("Ação desconhecida.")
+        session.commit()
+    except ClipadorError as e:
+        session.rollback()
+        return _page(request, session, settings, status_code=400, error=e.message)
+    return redirect("/publicar", msg)
 
 
 @router.post("/publicar/youtube/numeros")
-def youtube_refresh(session: SessionDep):
+def refresh_numbers(session: SessionDep):
     queue.enqueue(session, "youtube_metrics", None, {})
     session.commit()
     return redirect("/publicar", "Atualização dos números na fila.")
 
 
-@router.post("/candidatos/{cand_id}/publicar/youtube")
+# --- publishing one clip by hand --------------------------------------------------------------
+
+
+@router.post("/candidatos/{cand_id}/publicar")
 def publish_candidate(
-    request: Request, cand_id: int, session: SessionDep, settings: SettingsDep,
-    privacy: Annotated[str, Form()] = "private", publish_at: Annotated[str, Form()] = "",
-    title: Annotated[str, Form()] = "", confirm: Annotated[str | None, Form()] = None,
-):  # fmt: skip
+    request: Request,
+    cand_id: int,
+    session: SessionDep,
+    settings: SettingsDep,
+    account_id: Annotated[int, Form()] = 0,
+    privacy: Annotated[str, Form()] = "private",
+    publish_at: Annotated[str, Form()] = "",
+    title: Annotated[str, Form()] = "",
+    confirm: Annotated[str | None, Form()] = None,
+):
     if confirm is None:
-        return render(request, "publish/index.html", status_code=400,
-                      error="Confirme que revisou o clip (direitos, música e crédito).",
-                      **_ctx(session, settings, cand_id))  # fmt: skip
+        return _page(
+            request,
+            session,
+            settings,
+            cand_id,
+            status_code=400,
+            error="Confirme que revisou o clip (direitos, música e crédito).",
+        )
     try:
         when = publishing.parse_publish_at(publish_at)
-        pub = publishing.request_youtube(session, settings, cand_id, privacy=privacy,
-                                         publish_at=when, title=title or None)  # fmt: skip
+        pub = publishing.request_publication(
+            session,
+            settings,
+            cand_id,
+            account_id,
+            privacy=privacy,
+            publish_at=when,
+            title=title or None,
+        )
         session.commit()
     except ClipadorError as e:
         session.rollback()
-        return render(request, "publish/index.html", status_code=400, error=e.message,
-                      **_ctx(session, settings, cand_id))  # fmt: skip
-    return redirect("/publicar", f"Envio de '{pub.title}' na fila (job #{pub.job_id}).")
+        return _page(request, session, settings, cand_id, status_code=400, error=e.message)
+    what = "agendado" if pub.status == PublicationStatus.SCHEDULED else "na fila de envio"
+    return redirect("/publicar", f"'{pub.title}' {what}.")
+
+
+@router.post("/candidatos/{cand_id}/publicar/youtube")
+def publish_candidate_legacy(
+    request: Request,
+    cand_id: int,
+    session: SessionDep,
+    settings: SettingsDep,
+    privacy: Annotated[str, Form()] = "private",
+    publish_at: Annotated[str, Form()] = "",
+    title: Annotated[str, Form()] = "",
+    confirm: Annotated[str | None, Form()] = None,
+):
+    yt = next(
+        (a for a in accounts.accounts(session, active_only=True) if a.platform == "youtube"), None
+    )
+    return publish_candidate(
+        request, cand_id, session, settings, yt.id if yt else 0, privacy, publish_at, title, confirm
+    )

@@ -82,7 +82,7 @@
             <div class="cand-actions">
               <a class="btn small" href="/arquivos/{{ r.path }}" download>⬇ Baixar</a>
               {% if r.package_path %}<a class="btn small" href="/arquivos/{{ r.package_path }}" target="_blank">📝 Pacote (.txt)</a>{% endif %}
-              {% if r.kind == 'final' and c.status in ('approved', 'rendered') %}<a class="btn small" href="/publicar?candidato={{ c.id }}">▶ Publicar no YouTube</a>{% endif %}
+              {% if r.kind == 'final' and c.status in ('approved', 'rendered') %}<a class="btn small" href="/publicar?candidato={{ c.id }}">▶ Publicar</a>{% endif %}
             </div>
           {% elif r.status in ('queued', 'running') %}
             {% set prog = item.progress.get(r.kind) or 0 %}

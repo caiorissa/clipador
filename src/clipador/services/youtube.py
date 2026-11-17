@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import httpx
@@ -74,7 +74,26 @@ def load_client(settings: Settings) -> Client:
         raise YouTubeError("O arquivo de credenciais do YouTube não é válido. " + SETUP_HINT) from e
 
 
+class TokenStore(Protocol):
+    """Where an account's OAuth token lives (the social_account row; tests use memory)."""
+
+    def load(self) -> dict[str, Any] | None: ...
+    def save(self, token: dict[str, Any]) -> None: ...
+
+
+class MemoryStore:
+    def __init__(self, token: dict[str, Any] | None = None):
+        self.token = token
+
+    def load(self) -> dict[str, Any] | None:
+        return self.token
+
+    def save(self, token: dict[str, Any]) -> None:
+        self.token = token
+
+
 def token_path(settings: Settings) -> Path:
+    """Single-account token file of the first version (imported into an account, then gone)."""
     return settings.data_dir / "youtube_token.json"
 
 
@@ -135,6 +154,7 @@ def _token_request(data: dict[str, str], http: httpx.Client) -> dict[str, Any]:
 
 def exchange_code(settings: Settings, code: str, redirect_uri: str, verifier: str,
                   http: httpx.Client | None = None) -> dict[str, Any]:  # fmt: skip
+    """Code -> token (with refresh token) + {"channel": {id, title}}. The caller stores it."""
     client = load_client(settings)
     with http or httpx.Client() as h:
         form = {"code": code, "client_id": client.client_id,
@@ -143,28 +163,25 @@ def exchange_code(settings: Settings, code: str, redirect_uri: str, verifier: st
         tok = _token_request(form, h)
         if not tok.get("refresh_token"):
             raise YouTubeError("O Google não devolveu um refresh token; tente conectar de novo.")
-        save_token(settings, tok)
-        try:
-            ch = YouTube(settings, h).channel()
-            tok["channel"] = ch
-            save_token(settings, tok)
-        except YouTubeError:
-            pass
-    return tok
+        store = MemoryStore(tok)
+        tok["channel"] = YouTube(settings, h, store).channel()
+    return store.token
 
 
 # --- API ---------------------------------------------------------------------------------------
 
 
 class YouTube:
-    def __init__(self, settings: Settings, http: httpx.Client | None = None):
+    def __init__(self, settings: Settings, http: httpx.Client | None = None,
+                 store: TokenStore | None = None):  # fmt: skip
         self.settings = settings
         self.http = http or httpx.Client()
+        self.store = store or MemoryStore(load_token(settings))
 
     def _access_token(self) -> str:
-        tok = load_token(self.settings)
+        tok = self.store.load()
         if not tok or not tok.get("refresh_token"):
-            raise YouTubeError("Conecte sua conta do YouTube em /publicar antes de publicar.")
+            raise YouTubeError("Esta conta do YouTube perdeu a autorização: conecte de novo.")
         if tok.get("access_token") and tok.get("expires_at", 0) > time.time():
             return tok["access_token"]
         client = load_client(self.settings)
@@ -173,7 +190,7 @@ class YouTube:
                                 "refresh_token": tok["refresh_token"],
                                 "grant_type": "refresh_token"}, self.http)  # fmt: skip
         tok.update({k: v for k, v in fresh.items() if k != "refresh_token" or v})
-        save_token(self.settings, tok)
+        self.store.save(tok)
         return tok["access_token"]
 
     def _headers(self, **extra) -> dict[str, str]:

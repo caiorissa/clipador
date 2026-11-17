@@ -144,7 +144,7 @@ class Worker:
                 self.worker_id,
                 self.settings.worker_concurrency,
             )
-            last_beat = last_recover = last_live = 0.0
+            last_beat = last_recover = last_live = last_autopost = 0.0
             last_metrics = time.monotonic() - 3600 * self.settings.youtube_metrics_hours + 120
             last_watch = time.monotonic() - self.settings.live_watch_interval_seconds + 15
             while not self.stopping.is_set():
@@ -156,6 +156,9 @@ class Worker:
                 if now - last_watch >= self.settings.live_watch_interval_seconds:
                     self._live_auto_watch()
                     last_watch = now
+                if now - last_autopost >= self.settings.autopost_tick_seconds:
+                    self._autopost_tick()
+                    last_autopost = now
                 hours = self.settings.youtube_metrics_hours
                 if hours > 0 and now - last_metrics >= hours * 3600:
                     self._queue_youtube_metrics()
@@ -204,15 +207,32 @@ class Worker:
         self._watch_thread = threading.Thread(target=work, name="live-watch", daemon=True)
         self._watch_thread.start()
 
-    def _queue_youtube_metrics(self) -> None:
-        """Refresh the numbers of published clips (only when YouTube is connected)."""
+    def _autopost_tick(self) -> None:
+        """Auto-post: schedule newly APPROVED clips on each account's grid, upload the due ones."""
         from sqlmodel import Session
 
-        from clipador.services import youtube
+        from clipador.services import accounts
 
         try:
-            if not youtube.connected(self.settings):
-                return
+            with Session(self.engine, expire_on_commit=False) as s:
+                accounts.import_legacy_youtube(s, self.settings)
+                notes = accounts.autopost_tick(s, self.settings)
+                s.commit()
+            for note in notes:
+                log.info(note)
+        except Exception:
+            log.exception("Falha no agendamento automático das postagens")
+
+    def _queue_youtube_metrics(self) -> None:
+        """Refresh the numbers of published clips (only when some account is connected)."""
+        from sqlmodel import Session
+
+        from clipador.services import accounts
+
+        try:
+            with Session(self.engine) as s:
+                if not accounts.accounts(s, active_only=True):
+                    return
             with Session(self.engine) as s:
                 queue.enqueue(s, "youtube_metrics", None, {})
                 s.commit()

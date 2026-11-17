@@ -1,75 +1,152 @@
 {% extends "base.html" %}
 {% block title %}Publicar{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Publicar</h1></div>
-<p class="muted">Envia ao YouTube Shorts pela API oficial, só quando você clica e só clips aprovados.
-  TikTok e Reels: use o vídeo final e o pacote (.txt) de cada corte. Os números dos vídeos voltam
-  para cá a cada {{ '6' }} h e entram no <code>clipador calibrate</code> (o que performou bem ensina a detecção).</p>
-
-<div class="card">
-  <h3>YouTube</h3>
-  {% if not configured %}
-    <p class="small warn-text">{{ setup_error }}</p>
-  {% elif connected %}
-    <p>✔ Conectado{% if channel %} ao canal <strong>{{ channel.title }}</strong>{% endif %}.</p>
-    <div class="cand-actions">
-      <form method="post" action="/publicar/youtube/numeros"><button class="btn small">Atualizar números agora</button></form>
-      <form method="post" action="/publicar/youtube/desconectar"><button class="btn small danger">Desconectar</button></form>
-    </div>
-  {% else %}
-    <p class="small muted">Abre a tela de autorização do Google neste navegador; o token fica só neste computador.</p>
-    <a class="btn primary" href="/publicar/youtube/conectar">Conectar YouTube</a>
+<div class="page-head"><h1>Publicar</h1>
+  {% if accs %}
+  <form method="post" action="/publicar/pausar-tudo" class="cand-actions">
+    {% set any_active = accs|selectattr('paused', 'equalto', false)|list %}
+    <input type="hidden" name="pausar" value="{{ '1' if any_active else '0' }}">
+    <button class="btn small {{ 'danger' if any_active }}">{{ '⏸ Pausar tudo' if any_active else '▶ Retomar tudo' }}</button>
+  </form>
   {% endif %}
 </div>
+<p class="muted">Só clips que <strong>você aprovou</strong> são postados. Com a postagem automática ligada numa conta,
+  cada clip aprovado dos streamers dela entra sozinho na grade de horários e é enviado na hora certa
+  (o worker precisa estar rodando). Alertas fortes da IA ou música no trecho seguram o clip para você liberar.</p>
+
+<h2>Contas</h2>
+<div class="cand-actions" style="margin-bottom: .75rem">
+  <a class="btn {{ '' if yt_error else 'primary' }}" href="/publicar/youtube/conectar">+ Conectar canal do YouTube</a>
+  <a class="btn {{ '' if tt_error else 'primary' }}" href="/publicar/tiktok/conectar">+ Conectar TikTok</a>
+</div>
+{% if yt_error %}<p class="small warn-text">YouTube: {{ yt_error }}</p>{% endif %}
+{% if tt_error %}<p class="small warn-text">TikTok: {{ tt_error }}<br>URL de retorno para cadastrar no app do TikTok: <code>{{ tiktok_redirect }}</code></p>{% endif %}
+
+{% if not accs %}<div class="empty">Nenhuma conta conectada ainda.</div>{% endif %}
+{% for a in accs %}
+<details class="card" {{ 'open' if a.active and not a.autopost }}>
+  <summary>
+    <span class="badge platform-{{ a.platform }}">{{ platform_labels[a.platform] }}</span>
+    <strong>{{ a.name }}</strong>
+    {% if not a.active %}<span class="badge fail">desconectada</span>
+    {% elif a.paused %}<span class="badge warn">pausada</span>
+    {% elif a.autopost %}<span class="badge ok">postagem automática</span>
+    {% else %}<span class="badge muted">só manual</span>{% endif %}
+    <span class="small muted">· {{ totals.get(a.id, 0) }} views
+      {% if a.autopost %}· {{ 'assim que aprovar' if a.post_now else a.slots|join(', ') }} · até {{ a.max_per_day }}/dia{% endif %}</span>
+  </summary>
+  {% if a.active %}
+  <form method="post" action="/publicar/contas/{{ a.id }}" class="form" style="margin-top: .75rem">
+    <label class="check"><input type="checkbox" name="autopost" {{ 'checked' if a.autopost }}> Postagem automática dos clips aprovados</label>
+    <div class="grid4">
+      <label>Horários (vírgula)
+        <input name="slots" value="{{ a.slots|join(', ') }}" placeholder="12:00, 18:00, 21:00">
+      </label>
+      <label>Máximo por dia
+        <input name="max_per_day" type="number" min="1" max="50" value="{{ a.max_per_day }}">
+      </label>
+      <label>Intervalo mínimo (min)
+        <input name="min_gap_minutes" type="number" min="0" max="1440" value="{{ a.min_gap_minutes }}">
+      </label>
+      <label>Visibilidade
+        <select name="privacy">{% for k, v in privacy_labels.items() %}<option value="{{ k }}" {{ 'selected' if a.privacy == k }}>{{ v }}</option>{% endfor %}</select>
+      </label>
+    </div>
+    <label class="check small"><input type="checkbox" name="post_now" {{ 'checked' if a.post_now }}> Postar assim que aprovar (ignora os horários; respeita o máximo por dia e o intervalo)</label>
+    <label class="check small"><input type="checkbox" name="hold_on_alerts" {{ 'checked' if a.hold_on_alerts }}> Segurar clips com alerta forte da IA ou música (eu libero à mão)</label>
+    <label class="check small"><input type="checkbox" name="paused" {{ 'checked' if a.paused }}> Pausada</label>
+    <div class="small muted" style="margin: .5rem 0 .25rem">Streamers desta conta (nenhum marcado = todos):</div>
+    <div class="cand-actions">
+      {% for s in streamers %}<label class="check small"><input type="checkbox" name="streamer_ids" value="{{ s.id }}" {{ 'checked' if s.id in a.streamer_ids }}> {{ s.display_name }}</label>{% endfor %}
+    </div>
+    {% if a.platform == 'tiktok' %}<p class="small muted">TikTok: até o app ser aprovado pelo TikTok, os posts saem como privados.</p>{% endif %}
+    {% if a.platform == 'youtube' %}<p class="small muted">YouTube: o vídeo é enviado até {{ 12 }} h antes do horário, privado, e fica público sozinho na hora (mesmo com o PC desligado). Cota grátis: ~6 envios por dia por projeto do Google.</p>{% endif %}
+    <div class="form-actions"><button class="btn primary">Salvar</button></div>
+  </form>
+  <form method="post" action="/publicar/contas/{{ a.id }}/desconectar" onsubmit="return confirm('Desconectar {{ a.name }}? Os agendados dela são cancelados.')">
+    <button class="btn small danger">Desconectar</button>
+  </form>
+  {% else %}
+    <p class="small muted">Conecte de novo pelo botão acima para reativar.</p>
+  {% endif %}
+</details>
+{% endfor %}
 
 {% if form %}{% set c = form.candidate %}{% set d = form.draft %}
-<form method="post" action="/candidatos/{{ c.id }}/publicar/youtube" class="card form">
-  <h3>Enviar o clip #{{ c.rank }} {% if form.source %}de {{ form.source.title or form.source.url }}{% endif %}</h3>
+<form method="post" action="/candidatos/{{ c.id }}/publicar" class="card form">
+  <h3>Publicar o clip #{{ c.rank }} {% if form.source %}de {{ form.source.title or form.source.url }}{% endif %}</h3>
   {% if not form.render %}<div class="flash warn small">Renderize o corte final antes de publicar.</div>{% endif %}
   {% if form.render %}<video class="rendered" controls preload="metadata" playsinline src="/arquivos/{{ form.render.path }}" style="max-height: 360px"></video>{% endif %}
-  <label>Título
-    <input name="title" maxlength="100" value="{{ d.title if d else '' }}">
-  </label>
-  {% if d %}<p class="small muted">Descrição e hashtags vêm do rascunho do YouTube do clip (edite na página da fonte):<br>
-    <span style="white-space: pre-line">{{ d.description }}</span><br>{{ d.hashtags|join(' ') }}</p>{% endif %}
   <div class="grid3">
+    <label>Conta
+      <select name="account_id">{% for a in accs if a.active %}<option value="{{ a.id }}">{{ platform_labels[a.platform] }} · {{ a.name }}</option>{% endfor %}</select>
+    </label>
     <label>Visibilidade
-      <select name="privacy">
-        {% for k, v in privacy_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == 'private' }}>{{ v }}</option>{% endfor %}
-      </select>
+      <select name="privacy">{% for k, v in privacy_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == 'private' }}>{{ v }}</option>{% endfor %}</select>
     </label>
     <label>Agendar (opcional)
       <input type="datetime-local" name="publish_at">
     </label>
   </div>
+  <label>Título (YouTube)
+    <input name="title" maxlength="100" value="{{ d.title if d else '' }}">
+  </label>
+  {% if d %}<p class="small muted">Descrição/legenda e hashtags vêm dos rascunhos do clip (edite na página da fonte).</p>{% endif %}
   <label class="check small"><input type="checkbox" name="confirm"> Revisei o clip: o streamer autoriza, o crédito está certo e não há música com direitos autorais.</label>
-  <div class="form-actions"><button class="btn primary" {{ 'disabled' if not (connected and form.render) }}>Enviar ao YouTube</button></div>
+  <div class="form-actions"><button class="btn primary" {{ 'disabled' if not (accs|selectattr('active')|list and form.render) }}>Publicar</button></div>
 </form>
 {% endif %}
 
-{% if pubs %}
+<h2>Fila</h2>
+{% if queue_rows %}
 <div class="table-wrap">
 <table class="jobs">
-  <thead><tr><th>Clip</th><th>Status</th><th>Visibilidade</th><th>Views</th><th>Likes</th><th>Coment.</th><th></th></tr></thead>
+  <thead><tr><th>Clip</th><th>Conta</th><th>Quando</th><th>Status</th><th></th></tr></thead>
   <tbody>
-  {% for p in pubs %}{% set c = cands.get(p.candidate_id) %}
+  {% for p in queue_rows %}{% set c = cands.get(p.candidate_id) %}{% set a = acc_by_id.get(p.account_id) %}
     <tr>
-      <td class="small">{{ p.title }}{% if c %}<div class="muted">fonte #{{ c.source_id }} · clip #{{ c.rank }}</div>{% endif %}</td>
-      <td class="small"><span class="status status-{{ 'done' if p.status == 'published' else ('failed' if p.status == 'failed' else 'running') }}">{{ {'queued': 'na fila', 'uploading': 'enviando', 'published': 'publicado', 'failed': 'falhou'}.get(p.status, p.status) }}</span>
-        {% if p.error %}<div class="error-text">{{ p.error }}</div>{% endif %}
+      <td class="small">{{ p.title }}{% if c %}<div class="muted"><a href="/fontes/{{ c.source_id }}#cand-{{ c.id }}">fonte #{{ c.source_id }} · clip #{{ c.rank }}</a>{% if p.auto %} · automático{% endif %}</div>{% endif %}</td>
+      <td class="small">{% if a %}{{ platform_labels[a.platform] }} · {{ a.name }}{% if a.paused %} <span class="badge warn">pausada</span>{% endif %}{% endif %}</td>
+      <td class="small">{{ p.scheduled_for|dt if p.scheduled_for else 'agora' }}</td>
+      <td class="small"><span class="status status-{{ 'failed' if p.status == 'held' else 'running' }}">{{ status_labels.get(p.status, p.status) }}</span>
+        {% if p.hold_reason %}<div class="warn-text">⚠ {{ p.hold_reason }}</div>{% endif %}
         {% if p.job_id %}<div><a href="/jobs/{{ p.job_id }}">log</a></div>{% endif %}</td>
-      <td class="small">{{ privacy_labels.get(p.privacy, p.privacy) }}{% if p.publish_at %}<div class="muted">agendado: {{ p.publish_at|dt }}</div>{% endif %}</td>
-      <td>{{ p.views if p.views is not none else '—' }}</td>
-      <td>{{ p.likes if p.likes is not none else '—' }}</td>
-      <td>{{ p.comments if p.comments is not none else '—' }}</td>
-      <td class="actions">{% if p.url %}<a class="btn small" href="{{ p.url }}" target="_blank" rel="noopener">Abrir</a>{% endif %}</td>
+      <td class="actions">
+        {% if p.status == 'held' %}<form method="post" action="/publicar/fila/{{ p.id }}/liberar"><button class="btn small">Liberar</button></form>{% endif %}
+        {% if p.status in ('scheduled', 'held') %}
+          <form method="post" action="/publicar/fila/{{ p.id }}/agora"><button class="btn small">Postar agora</button></form>
+          <form method="post" action="/publicar/fila/{{ p.id }}/cancelar"><button class="btn small danger">Cancelar</button></form>
+        {% endif %}
+      </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-<p class="small muted">Total: {{ total_views }} views{% if pubs[0].metrics_at %} · atualizado em {{ pubs[0].metrics_at|dt }}{% endif %}.</p>
-{% else %}
-  <div class="empty">Nada publicado ainda. Aprove um clip, renderize o final e clique em "Publicar no YouTube".</div>
-{% endif %}
+{% else %}<div class="empty">Nada na fila. Aprove clips na Revisão: com a postagem automática ligada, eles aparecem aqui com o horário.</div>{% endif %}
+
+<h2>Histórico</h2>
+{% if history %}
+<form method="post" action="/publicar/youtube/numeros" class="cand-actions" style="margin-bottom: .5rem"><button class="btn small">Atualizar números agora</button></form>
+<div class="table-wrap">
+<table class="jobs">
+  <thead><tr><th>Clip</th><th>Conta</th><th>Status</th><th>Views</th><th>Likes</th><th>Coment.</th><th></th></tr></thead>
+  <tbody>
+  {% for p in history %}{% set a = acc_by_id.get(p.account_id) %}
+    <tr>
+      <td class="small">{{ p.title }}<div class="muted">{{ privacy_labels.get(p.privacy, p.privacy) }}{% if p.publish_at %} · público às {{ p.publish_at|dt }}{% endif %}</div></td>
+      <td class="small">{% if a %}{{ platform_labels[a.platform] }} · {{ a.name }}{% else %}{{ p.platform }}{% endif %}</td>
+      <td class="small"><span class="status status-{{ 'done' if p.status == 'published' else ('failed' if p.status == 'failed' else 'canceled') }}">{{ status_labels.get(p.status, p.status) }}</span>
+        {% if p.error %}<div class="error-text">{{ p.error }}</div>{% endif %}</td>
+      <td>{{ p.views if p.views is not none else '—' }}</td>
+      <td>{{ p.likes if p.likes is not none else '—' }}</td>
+      <td>{{ p.comments if p.comments is not none else '—' }}</td>
+      <td class="actions">{% if p.url %}<a class="btn small" href="{{ p.url }}" target="_blank" rel="noopener">Abrir</a>{% endif %}
+        {% if p.status == 'failed' %}<form method="post" action="/publicar/fila/{{ p.id }}/cancelar"><button class="btn small">Arquivar</button></form>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<div class="empty">Nada publicado ainda.</div>{% endif %}
 {% endblock %}

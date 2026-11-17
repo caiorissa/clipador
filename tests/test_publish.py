@@ -23,7 +23,7 @@ from clipador.models import (
     RenderStatus,
 )
 from clipador.pipeline.base import StageContext
-from clipador.pipeline.stages.publish import PublishYouTubeStage
+from clipador.pipeline.stages.publish import PublishStage
 from clipador.services import publishing, youtube
 from clipador.utils import utcnow
 from tests.render_helpers import seed
@@ -95,9 +95,20 @@ def ysettings(settings, tmp_path):
     return settings
 
 
-def _connect(settings):
-    youtube.save_token(settings, {"access_token": "at-0", "refresh_token": "rt-1",
-                                  "expires_at": time.time() + 3000})  # fmt: skip
+def _connect(engine, platform="youtube", ext="UC1", name="Meu Canal"):
+    """A connected account (token valid for a while). Returns its id."""
+    from clipador.services import accounts
+
+    with Session(engine) as s:
+        acc = accounts.upsert_account(
+            s,
+            platform,
+            ext,
+            name,
+            {"access_token": "at-0", "refresh_token": "rt-1", "expires_at": time.time() + 3000},
+        )
+        s.commit()
+        return acc.id
 
 
 def _approved_with_final(settings, engine, tmp_path, with_render=True):
@@ -139,9 +150,9 @@ class _Rep:
 
 
 def _run_stage(settings, engine, pub_id):
-    ctx = StageContext(1, "publish_youtube", None, {"publication_id": pub_id}, 1, settings,
+    ctx = StageContext(1, "publish", None, {"publication_id": pub_id}, 1, settings,
                        engine, _Rep())  # fmt: skip
-    PublishYouTubeStage().run(ctx)
+    PublishStage().run(ctx)
 
 
 # --- pure / API ---------------------------------------------------------------------------------
@@ -160,14 +171,13 @@ def test_oauth_exchange_and_refresh(ysettings, google):
     url = youtube.auth_url(youtube.load_client(ysettings), "http://127.0.0.1:8000/cb", "st", ch)
     assert "code_challenge_method=S256" in url and "access_type=offline" in url
     tok = youtube.exchange_code(ysettings, "code1", "http://127.0.0.1:8000/cb", v)
-    assert tok["channel"]["title"] == "Meu Canal" and youtube.connected(ysettings)
+    assert tok["channel"]["title"] == "Meu Canal" and tok["refresh_token"] == "rt-1"
     assert google.token_requests[0]["code_verifier"] == v
-    t = youtube.load_token(ysettings)
-    t["expires_at"] = 0  # expired -> refreshed with the refresh token, which is kept
-    youtube.save_token(ysettings, t)
-    youtube.YouTube(ysettings).channel()
+    tok["expires_at"] = 0  # expired -> refreshed with the refresh token, which is kept
+    store = youtube.MemoryStore(tok)
+    youtube.YouTube(ysettings, store=store).channel()
     assert google.token_requests[-1]["grant_type"] == "refresh_token"
-    assert youtube.load_token(ysettings)["refresh_token"] == "rt-1"
+    assert store.token["refresh_token"] == "rt-1" and store.token["expires_at"] > time.time()
 
 
 def test_not_configured_message(settings):
@@ -180,33 +190,34 @@ def test_not_configured_message(settings):
 
 def test_publish_rules(ysettings, engine, tmp_path):
     cid = _approved_with_final(ysettings, engine, tmp_path, with_render=False)
+    with Session(engine) as s, pytest.raises(Exception, match="conta conectada"):
+        publishing.request_publication(s, ysettings, cid, 0, privacy="public")
+    acc = _connect(engine)
     with Session(engine) as s:
-        with pytest.raises(Exception, match="Conecte"):
-            publishing.request_youtube(s, ysettings, cid, privacy="public")
-        _connect(ysettings)
         with pytest.raises(Exception, match="Renderize o corte final"):
-            publishing.request_youtube(s, ysettings, cid, privacy="public")
+            publishing.request_publication(s, ysettings, cid, acc, privacy="public")
         c = s.get(Candidate, cid)
         c.status = CandidateStatus.SUGGESTED
         s.add(c)
         with pytest.raises(Exception, match="aprovados"):
-            publishing.request_youtube(s, ysettings, cid, privacy="public")
+            publishing.request_publication(s, ysettings, cid, acc, privacy="public")
     with pytest.raises(Exception, match="futuro"):
         publishing.parse_publish_at((utcnow() - timedelta(hours=1)).isoformat())
 
 
 def test_upload_end_to_end_with_resume(ysettings, engine, tmp_path, google, monkeypatch):
     monkeypatch.setattr(youtube, "CHUNK", 1000)  # several chunks for a 3000-byte file
-    _connect(ysettings)
+    acc = _connect(engine)
     cid = _approved_with_final(ysettings, engine, tmp_path)
     when = publishing.parse_publish_at((utcnow() + timedelta(days=1)).isoformat())
     with Session(engine, expire_on_commit=False) as s:
-        pub = publishing.request_youtube(s, ysettings, cid, privacy="public", publish_at=when)
+        pub = publishing.request_publication(s, ysettings, cid, acc, privacy="public",
+                                             publish_at=when)  # fmt: skip
         s.commit()
         with pytest.raises(Exception, match="já foi"):
-            publishing.request_youtube(s, ysettings, cid, privacy="public")
+            publishing.request_publication(s, ysettings, cid, acc, privacy="public")
         job = s.get(Job, pub.job_id)
-    assert job.type == "publish_youtube" and pub.title == "Capotou o carro"
+    assert job.type == "publish" and pub.title == "Capotou o carro"
     _run_stage(ysettings, engine, pub.id)
     with Session(engine) as s:
         p = s.get(Publication, pub.id)
@@ -217,7 +228,7 @@ def test_upload_end_to_end_with_resume(ysettings, engine, tmp_path, google, monk
     )
 
     with Session(engine) as s:
-        assert publishing.refresh_metrics(s, ysettings) == 1
+        assert publishing.refresh_metrics(s, ysettings, engine) == 1
         s.commit()
         p = s.get(Publication, pub.id)
     assert (p.views, p.likes, p.comments, p.privacy) == (1500, 90, 7, "public")
@@ -233,10 +244,18 @@ def test_quota_error_is_clear_and_final(ysettings, engine, tmp_path, monkeypatch
     monkeypatch.setattr(
         httpx, "Client", lambda *a, **k: real(transport=httpx.MockTransport(handler))
     )
-    _connect(ysettings)
+    acc = _connect(engine)
+    youtube_tok_expired = {"access_token": "x", "refresh_token": "rt-1", "expires_at": 0}
+    with Session(engine) as s:
+        from clipador.models import SocialAccount
+
+        a = s.get(SocialAccount, acc)
+        a.credentials = youtube_tok_expired
+        s.add(a)
+        s.commit()
     cid = _approved_with_final(ysettings, engine, tmp_path)
     with Session(engine, expire_on_commit=False) as s:
-        pub = publishing.request_youtube(s, ysettings, cid, privacy="unlisted")
+        pub = publishing.request_publication(s, ysettings, cid, acc, privacy="unlisted")
         s.commit()
     with pytest.raises(youtube.YouTubeError, match="Limite diário") as e:
         _run_stage(ysettings, engine, pub.id)
@@ -276,22 +295,29 @@ def test_publish_pages(ysettings, engine, tmp_path, google):
 
     client = TestClient(create_app(ysettings))
     r = client.get("/publicar")
-    assert r.status_code == 200 and "Conectar YouTube" in r.text
+    assert r.status_code == 200 and "Conectar canal do YouTube" in r.text
     r = client.get("/publicar/youtube/conectar", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith(youtube.AUTH_URL)
     state = dict(x.split("=", 1) for x in r.headers["location"].split("?")[1].split("&"))["state"]
     r = client.get(f"/publicar/youtube/callback?state={state}&code=abc", follow_redirects=False)
     assert "conectado" in r.headers["location"].lower()
-    assert youtube.connected(ysettings)
+    with Session(engine) as s:
+        from clipador.models import SocialAccount
+
+        acc = s.exec(select(SocialAccount)).one()
+    assert acc.name == "Meu Canal" and acc.credentials["refresh_token"] == "rt-1"
     assert "Meu Canal" in client.get("/publicar").text
 
     cid = _approved_with_final(ysettings, engine, tmp_path)
     page = client.get(f"/publicar?candidato={cid}")
-    assert "Enviar ao YouTube" in page.text and "Capotou o carro" in page.text
-    r = client.post(f"/candidatos/{cid}/publicar/youtube", data={"privacy": "public"})
+    assert "Publicar o clip" in page.text and "Capotou o carro" in page.text
+    r = client.post(
+        f"/candidatos/{cid}/publicar", data={"privacy": "public", "account_id": str(acc.id)}
+    )
     assert r.status_code == 400 and "Confirme" in r.text
-    r = client.post(f"/candidatos/{cid}/publicar/youtube",
-                    data={"privacy": "public", "confirm": "on"}, follow_redirects=False)  # fmt: skip
+    r = client.post(f"/candidatos/{cid}/publicar",
+                    data={"privacy": "public", "confirm": "on", "account_id": str(acc.id)},
+                    follow_redirects=False)  # fmt: skip
     assert r.status_code == 303
     with Session(engine) as s:
         assert s.exec(select(Publication)).one().status == PublicationStatus.QUEUED
