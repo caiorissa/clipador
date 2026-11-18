@@ -521,3 +521,4 @@ table.checks td:nth-child(2) { white-space: nowrap; width: 14rem; }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--panel-3); border-top-color: var(--accent); animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) { .approved-grid { grid-template-columns: 1fr; } .ap-card { grid-template-columns: 1fr; } .ap-media video, .ap-placeholder { width: 100%; max-width: 260px; } }
+table.jobs td:has(.error-text), table.jobs td:has(.warn-text) { min-width: 18rem; }
