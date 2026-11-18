@@ -202,6 +202,11 @@ def plan_render(
     fps = float(info.get("fps") or 30)
 
     start, end = c.eff_start, c.eff_end
+    # Detection rounds to whole seconds: a clip at the very end of the video may ask for a few
+    # tenths past it, and the rendered file would then fail the duration check.
+    src_len = (source.media_info or {}).get("duration") or source.duration_seconds
+    if window is None and src_len and end > float(src_len):
+        end = max(start + 0.5, float(src_len) - 0.05)
     # glossary -> valid per-word corrections; the resulting words go into the params hash, so a
     # glossary change only invalidates the renders whose captions it actually changes.
     words, _stale = caption_words(

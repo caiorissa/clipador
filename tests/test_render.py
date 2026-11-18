@@ -496,3 +496,14 @@ def test_jump_cut_removes_dead_air_and_keeps_captions_in_sync(rsettings, engine,
     r2 = _render(rsettings, engine, c1, "preview")
     dur2 = float(ffprobe_json(rsettings.abs_path(r2.path), "format=duration")["format"]["duration"])
     assert dur2 == pytest.approx(10.5, abs=0.2) and "jumpcut" not in r2.params
+
+
+@requires_ffmpeg
+def test_clip_past_the_end_of_the_video_is_clamped(rsettings, engine, media):
+    """Detection rounds the end up to a whole second; the render must stop at the real end."""
+    video = _copy(media, "16x9", rsettings)  # 12 s
+    _sid, (c1,), _ = seed(rsettings, engine, video, candidates=((6.0, 12.6, 8.2),))
+    r = _render(rsettings, engine, c1, "preview")
+    assert r.status == RenderStatus.DONE, r.error
+    dur = float(ffprobe_json(rsettings.abs_path(r.path), "format=duration")["format"]["duration"])
+    assert dur == pytest.approx(12.0 - 6.0 - 0.05, abs=0.2)
