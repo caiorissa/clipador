@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from sqlmodel import col, select
@@ -175,6 +176,24 @@ def _llm_up(settings) -> bool:
         return False
 
 
+_RESIDENT: dict[str, Any] = {}
+
+
+def _live_transcriber(settings, log_cb) -> tuple[Any, bool]:
+    """On a Mac (MLX, unified memory) the Whisper model stays loaded between live segments:
+    reloading it for every 5-min segment was a big part of each analysis. On the PC
+    (faster-whisper on an 8 GB GPU) it is still freed after each segment, so the local AI
+    can use the VRAM. Returns (transcriber, keep_loaded)."""
+    if tx.resolve_backend(settings) != "mlx":
+        return tx.make_transcriber(settings, log_cb), False
+    key = tx.resolve_model(settings, "mlx")
+    t = _RESIDENT.get(key)
+    if t is None:
+        t = _RESIDENT[key] = tx.make_transcriber(settings, log_cb)
+    t.log_cb = log_cb
+    return t, True
+
+
 class LiveAnalyzeStage(Stage):
     name = ANALYZE
     needs_gpu = True  # Whisper
@@ -213,12 +232,12 @@ class LiveAnalyzeStage(Stage):
         if not words_path.is_file():
             ctx.progress(5, f"Segmento {seg.index}: transcrevendo {seg.duration_s:.0f}s…")
             lang = live.session_language(settings, ls.id)
-            transcriber = tx.make_transcriber(settings, ctx.log)
+            transcriber, keep = _live_transcriber(settings, ctx.log)
             try:
                 words = transcriber.transcribe(wav, lang, lambda f: ctx.progress(5 + 70 * f))
                 lang = lang or getattr(transcriber, "detected_language", None)
             finally:
-                if hasattr(transcriber, "close"):
+                if not keep and hasattr(transcriber, "close"):
                     transcriber.close()
             live.save_segment_words(words_path, [
                 (w.start + seg.start_offset_s, w.end + seg.start_offset_s, w.word, w.prob)

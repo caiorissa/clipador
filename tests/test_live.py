@@ -485,3 +485,45 @@ def test_claude_enrich_does_not_wait_for_the_gpu(engine):
     assert queue.release_cloud_ai_from_gpu(engine) == 1
     with Session(engine) as s:
         assert not s.get(Job, j.id).needs_gpu and s.get(Job, t.id).needs_gpu
+
+
+def test_ai_scores_clips_of_a_live_still_being_captured(engine, lsettings, monkeypatch, tmp_path):
+    """The source of a live in progress has no downloaded file: the AI step must still run."""
+    from clipador.models import CandidateEnrichment
+    from clipador.pipeline.base import StageContext
+    from clipador.pipeline.stages.enrich import EnrichStage
+    from tests.fake_llm import FakeLLM, good_answer
+
+    llm = FakeLLM(lambda msgs, i: good_answer(nota=8))
+    monkeypatch.setattr("clipador.llm.client.make_llm_client", lambda settings: llm)
+    st = _streamer(engine, handle="aovivo")
+    with Session(engine, expire_on_commit=False) as s:
+        ls = live.create_session(s, lsettings, streamer_id=st, url="https://www.twitch.tv/aovivo")
+        c = Candidate(source_id=ls.source_id, analysis_run_id=ls.run_id, rank=1, start=10,
+                      end=40, peak_t=20, score=60, live_session_id=ls.id)  # fmt: skip
+        s.add(c)
+        s.commit()
+    live.save_segment_words(live.segment_words_path(lsettings, ls.id, 0),
+                            [(12.0, 12.4, "olha", 0.9), (12.5, 13.0, "isso", 0.9)])  # fmt: skip
+
+    class Rep:
+        def report_progress(self, *a):
+            pass
+
+        def append_log(self, *a):
+            pass
+
+        def is_canceled(self, *a):
+            return False
+
+        def is_stopping(self):
+            return False
+
+    ctx = StageContext(1, "enrich", ls.source_id,
+                       {"run_id": ls.run_id, "candidate_ids": [c.id], "live_session_id": ls.id},
+                       1, lsettings, engine, Rep())  # fmt: skip
+    EnrichStage().run(ctx)
+    with Session(engine) as s:
+        e = s.exec(select(CandidateEnrichment)).one()
+        cand = s.get(Candidate, c.id)
+    assert e.status == "ok" and cand.final_score is not None

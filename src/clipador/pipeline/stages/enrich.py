@@ -26,6 +26,7 @@ from clipador.models import (
     Candidate,
     CandidateEnrichment,
     EnrichStatus,
+    Source,
     Streamer,
 )
 from clipador.pipeline.base import Stage, StageContext
@@ -88,7 +89,13 @@ class EnrichStage(Stage):
     def run(self, ctx: StageContext) -> None:
         settings = ctx.settings
         t_start = time.monotonic()
-        source = load_source(ctx)
+        if ctx.payload.get("live_session_id"):  # a live still being captured: no full file yet
+            with ctx.session() as s:
+                source = s.get(Source, ctx.source_id)
+            if source is None:
+                raise ClipadorError(f"Fonte #{ctx.source_id} não existe.")
+        else:
+            source = load_source(ctx)
         payload = ctx.payload
         with ctx.session() as s:
             q = select(AnalysisRun).where(AnalysisRun.source_id == source.id)
