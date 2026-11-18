@@ -29,6 +29,13 @@ def test_post_on_the_grid_now_and_at_a_date(ysettings, engine, tmp_path):
     acc1 = _connect(engine, ext="UC1", name="Geral")
     acc2 = _connect(engine, ext="UC2", name="Lacy")
     acc3 = _connect(engine, ext="UC3", name="Outro")
+    from clipador.models import SocialAccount
+
+    with Session(engine) as s:  # normal edit here (per-account styles: tests/test_variants.py)
+        for a in s.exec(select(SocialAccount)).all():
+            a.render_style = {}
+            s.add(a)
+        s.commit()
     with Session(engine, expire_on_commit=False) as s:
         p1 = approved.post(s, ysettings, cid, acc1, when="grade", privacy="public")
         p2 = approved.post(s, ysettings, cid, acc2, when="agora", privacy="public")

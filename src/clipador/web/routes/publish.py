@@ -21,6 +21,7 @@ from clipador.models import (
     Source,
     Streamer,
 )
+from clipador.render import variants
 from clipador.services import accounts, publishing, tiktok, youtube
 from clipador.utils import utcnow
 from clipador.web.deps import get_session, get_settings_dep, redirect, render
@@ -121,6 +122,7 @@ def _ctx(session: Session, settings: Settings, cand_id: int | None) -> dict:
             "canceled": "cancelado",
         },
         "tiktok_redirect": None,
+        "variants": variants,
     }
 
 
@@ -253,6 +255,21 @@ async def save_account(request: Request, acc_id: int, session: SessionDep, setti
             raise ValidationError("Visibilidade inválida.")
         acc.privacy = privacy
         acc.streamer_ids = sorted(int(v) for v in form.getlist("streamer_ids") if str(v).isdigit())
+        if form.get("style_form"):
+            acc.render_style = variants.normalize(
+                {
+                    "layout": form.get("st_layout", ""),
+                    "caption_style": form.get("st_caption", ""),
+                    "grade": form.get("st_grade", "nenhum"),
+                    "speed": float(str(form.get("st_speed") or 1).replace(",", ".")),
+                    "zoom": float(str(form.get("st_zoom") or 1).replace(",", ".")),
+                    "foco_x": float(str(form.get("st_foco") or 0.5).replace(",", ".")),
+                    "trim_start": float(str(form.get("st_trim") or 0).replace(",", ".")),
+                    "opening": form.get("st_opening", "auto"),
+                    "credit": form.get("st_credit") == "on",
+                    "peak_zoom": form.get("st_peak") == "on",
+                }
+            )
         if not acc.slots and not acc.post_now:
             raise ValidationError(
                 "Defina pelo menos um horário, ou marque 'postar assim que aprovar'."
@@ -271,6 +288,19 @@ async def save_account(request: Request, acc_id: int, session: SessionDep, setti
         )
     state = "ligada" if acc.autopost else "desligada"
     return redirect("/publicar", f"{acc.name}: configuração salva (postagem automática {state}).")
+
+
+@router.post("/publicar/contas/{acc_id}/sortear-estilo")
+def randomize_style(acc_id: int, session: SessionDep):
+    acc = _account(session, acc_id)
+    others = [a.render_style for a in accounts.accounts(session) if a.id != acc.id]
+    acc.render_style = variants.suggest([*others, acc.render_style, {}])
+    acc.updated_at = utcnow()
+    session.add(acc)
+    session.commit()
+    return redirect(
+        "/publicar", f"{acc.name}: novo estilo de edição — {variants.describe(acc.render_style)}."
+    )
 
 
 @router.post("/publicar/contas/{acc_id}/desconectar")

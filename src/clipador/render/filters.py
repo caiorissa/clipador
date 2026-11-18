@@ -159,6 +159,7 @@ def vertical_graph(
     opts: LayoutOptions | None = None,
     out_size: tuple[int, int] = (OUT_W, OUT_H),
     captions: bool = True,
+    grade: str = "",
 ) -> str:
     """Full filter_complex with outputs [v] and [a], built directly at `out_size` (the preview
     uses the same proportions, so it matches the final; the ASS is authored at 1080x1920 and
@@ -172,7 +173,8 @@ def vertical_graph(
     else:
         parts = layout_blur(src_w, src_h, zoom, w, h)
     fade_out = max(0.0, duration - 0.25)
-    tail = f"[v0]fade=t=in:d=0.15,fade=t=out:st={fade_out:.3f}:d=0.25"
+    tail = "[v0]" + (f"{grade}," if grade else "")
+    tail += f"fade=t=in:d=0.15,fade=t=out:st={fade_out:.3f}:d=0.25"
     if captions:
         tail += f",subtitles={SUBS_FILE}:fontsdir={FONTS_SUBDIR}"
     parts.append(tail + ",format=yuv420p[v]")

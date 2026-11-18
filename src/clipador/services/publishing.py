@@ -28,13 +28,14 @@ PUBLISH_PRIORITY = 10  # an upload you asked for goes ahead of background work
 
 
 def final_render(session: Session, settings: Settings, cand_id: int) -> Render | None:
-    """Most recent finished final render whose file still exists."""
+    """Most recent finished final render (the clip's normal edit) whose file still exists."""
     rows = session.exec(
         select(Render)
         .where(
             Render.candidate_id == cand_id,
             Render.kind == RenderKind.FINAL,
             Render.status == RenderStatus.DONE,
+            Render.account_id == None,  # noqa: E711  (accounts' own edits are not "the" final)
         )
         .order_by(col(Render.id).desc())
     ).all()
@@ -89,9 +90,9 @@ def request_publication(
     acc = session.get(SocialAccount, account_id) if account_id else None
     if acc is None or not acc.active:
         raise ValidationError("Escolha uma conta conectada (Publicar → Contas).")
-    r = final_render(session, settings, cand_id)
+    r, ready = accounts.account_render(session, settings, acc, c)
     if r is None:
-        raise ValidationError("Renderize o corte final antes de publicar.")
+        raise ValidationError("Não foi possível renderizar este clip (o vídeo da fonte sumiu?).")
     busy = session.exec(
         select(Publication).where(
             Publication.candidate_id == cand_id,
@@ -102,6 +103,15 @@ def request_publication(
     if busy is not None:
         raise ValidationError(f"Este clip já foi (ou vai ser) postado em {acc.name}.")
     pub = accounts.new_publication(session, acc, c, r.id, privacy=privacy, title=title)
+    if not ready:  # this account's own edit is rendering: posted by the scheduler when ready
+        pub.status = PublicationStatus.SCHEDULED
+        pub.scheduled_for = (
+            utcnow() if acc.platform == "youtube" or publish_at is None else publish_at
+        )
+        pub.publish_at = publish_at if acc.platform == "youtube" else None
+        session.add(pub)
+        session.flush()
+        return pub
     if acc.platform == "tiktok" and publish_at is not None:
         pub.status, pub.scheduled_for = PublicationStatus.SCHEDULED, publish_at
         session.add(pub)

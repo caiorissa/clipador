@@ -413,6 +413,10 @@ class Render(SQLModel, table=True):
     encoder: str | None = None
     render_seconds: float | None = None
     loudness_lufs: float | None = None
+    # Step 6C: a social account's own edit of the clip (its "estilo de edição"), so every
+    # account posts a different file. None = the clip's normal render.
+    account_id: int | None = Field(default=None, index=True)
+    variant: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -537,6 +541,11 @@ class SocialAccount(SQLModel, table=True):
     # Wait this long after the approval before posting here (e.g. the general profile posts
     # a few hours after the streamer's own profile, so they don't compete).
     delay_minutes: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    # Step 6C: how this account's version of each clip is edited (layout, captions, color,
+    # speed, zoom, trim, opening title...). {} = the clip's normal render.
+    render_style: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False, server_default="{}")
+    )
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

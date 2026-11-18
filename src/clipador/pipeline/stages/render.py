@@ -41,7 +41,8 @@ class RenderStage(Stage):
                     done.append(row.id)
                     continue
                 c = s.get(Candidate, row.candidate_id)
-                plan = rendering.plan_render(s, ctx.engine, ctx.settings, c, row.kind)
+                plan = rendering.plan_render(s, ctx.engine, ctx.settings, c, row.kind,
+                                             row.variant)  # fmt: skip
 
                 def progress(f: float, i=i) -> None:
                     ctx.progress(100 * (i + f) / len(rows))

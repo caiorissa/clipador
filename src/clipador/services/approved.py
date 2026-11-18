@@ -90,8 +90,13 @@ def items(session: Session, settings: Settings, *, streamer_id: int | None = Non
         select(Source).where(col(Source.id).in_({c.source_id for c in cands}))).all()}  # fmt: skip
     streamers = {s.id: s for s in session.exec(select(Streamer)).all()}
     renders: dict[int, list[Render]] = {}
-    for r in session.exec(select(Render).where(col(Render.candidate_id).in_(ids),
-                                               Render.kind == RenderKind.FINAL)).all():  # fmt: skip
+    for r in session.exec(
+        select(Render).where(
+            col(Render.candidate_id).in_(ids),
+            Render.kind == RenderKind.FINAL,
+            col(Render.account_id).is_(None),
+        )
+    ).all():
         renders.setdefault(r.candidate_id, []).append(r)
     drafts = {d.candidate_id: d for d in session.exec(select(PostDraft).where(
         col(PostDraft.candidate_id).in_(ids), PostDraft.platform == "youtube")).all()}  # fmt: skip
@@ -168,9 +173,9 @@ def post(session: Session, settings: Settings, cand_id: int, account_id: int, *,
         raise ValidationError("Só clips aprovados podem ser postados.")
     if acc is None or not acc.active:
         raise ValidationError("Escolha uma conta conectada.")
-    r = publishing.final_render(session, settings, cand_id)
+    r, _ready = accounts.account_render(session, settings, acc, c)
     if r is None:
-        raise ValidationError("Renderize o corte final antes de postar.")
+        raise ValidationError("Não foi possível renderizar este clip (o vídeo da fonte sumiu?).")
     if session.exec(select(Publication).where(
             Publication.candidate_id == cand_id, Publication.account_id == acc.id,
             col(Publication.status).in_(list(accounts.ACTIVE_PUB)))).first():  # fmt: skip

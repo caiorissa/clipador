@@ -48,6 +48,7 @@
     {% else %}<span class="badge muted">só manual</span>{% endif %}
     <span class="small muted">· {% if a.streamer_ids %}{% for sid in a.streamer_ids %}{{ streamer_names.get(sid, '#' ~ sid) }}{{ ', ' if not loop.last }}{% endfor %}{% else %}todos os streamers{% endif %}
       {% if a.delay_minutes %}· espera {{ (a.delay_minutes / 60)|round(1) }} h{% endif %}
+      · 🎨 {{ variants.describe(a.render_style) }}
       · {{ totals.get(a.id, 0) }} views
       {% if a.autopost %}· {{ 'assim que aprovar' if a.post_now else a.slots|join(', ') }} · até {{ a.max_per_day }}/dia{% endif %}</span>
   </summary>
@@ -74,6 +75,27 @@
     <label class="check small"><input type="checkbox" name="post_now" {{ 'checked' if a.post_now }}> Postar assim que aprovar (ignora os horários; respeita o máximo por dia e o intervalo)</label>
     <label class="check small"><input type="checkbox" name="hold_on_alerts" {{ 'checked' if a.hold_on_alerts }}> Segurar clips com alerta forte da IA ou música (eu libero à mão)</label>
     <label class="check small"><input type="checkbox" name="paused" {{ 'checked' if a.paused }}> Pausada</label>
+    {% set st = variants.normalize(a.render_style) %}
+    <input type="hidden" name="style_form" value="1">
+    <fieldset class="style-box">
+      <legend>🎨 Estilo de edição desta conta</legend>
+      <p class="small muted" style="margin-top:0">Cada conta posta a <strong>sua própria versão</strong> do clip, para as redes não verem o mesmo vídeo em vários perfis.</p>
+      <div class="grid4">
+        <label>Layout<select name="st_layout">{% for k, v in variants.LAYOUT_CHOICES.items() %}<option value="{{ k }}" {{ 'selected' if st.layout == k }}>{{ v }}</option>{% endfor %}</select></label>
+        <label>Legenda<select name="st_caption"><option value="">padrão</option>{% for k, cs in caption_styles().items() %}<option value="{{ k }}" {{ 'selected' if st.caption_style == k }}>{{ cs.label }}</option>{% endfor %}</select></label>
+        <label>Cor<select name="st_grade">{% for k, g in variants.GRADES.items() %}<option value="{{ k }}" {{ 'selected' if st.grade == k }}>{{ g[0] }}</option>{% endfor %}</select></label>
+        <label>Velocidade<select name="st_speed">{% for v in variants.SPEEDS %}<option value="{{ v }}" {{ 'selected' if (st.speed - v)|abs < 0.001 }}>{{ '%g' % v }}x</option>{% endfor %}</select></label>
+        <label>Zoom<input name="st_zoom" type="number" min="1" max="1.5" step="0.01" value="{{ st.zoom }}"></label>
+        <label>Enquadramento (0–1)<input name="st_foco" type="number" min="0" max="1" step="0.05" value="{{ st.foco_x }}"></label>
+        <label>Começar depois (s)<select name="st_trim">{% for v in variants.TRIMS %}<option value="{{ v }}" {{ 'selected' if (st.trim_start - v)|abs < 0.001 }}>+{{ '%g' % v }} s</option>{% endfor %}</select></label>
+        <label>Texto de abertura<select name="st_opening">{% for k, v in variants.OPENINGS.items() %}<option value="{{ k }}" {{ 'selected' if st.opening == k }}>{{ v }}</option>{% endfor %}</select></label>
+      </div>
+      <div class="cand-actions" style="margin:.4rem 0 0">
+        <label class="check small"><input type="checkbox" name="st_credit" {{ 'checked' if st.credit }}> crédito "via @…"</label>
+        <label class="check small"><input type="checkbox" name="st_peak" {{ 'checked' if st.peak_zoom }}> zoom no pico</label>
+        <button class="btn small ghost" type="submit" form="randomize-{{ a.id }}">🎲 Sortear outro estilo</button>
+      </div>
+    </fieldset>
     <div class="small muted" style="margin: .5rem 0 .25rem">Streamers desta conta (nenhum marcado = <strong>todos</strong>: perfil geral, que intercala os streamers):</div>
     <div class="cand-actions">
       {% for s in streamers %}<label class="check small"><input type="checkbox" name="streamer_ids" value="{{ s.id }}" {{ 'checked' if s.id in a.streamer_ids }}> {{ s.display_name }}</label>{% endfor %}
@@ -82,6 +104,7 @@
     {% if a.platform == 'youtube' %}<p class="small muted">YouTube: o vídeo é enviado até {{ 12 }} h antes do horário, privado, e fica público sozinho na hora (mesmo com o PC desligado). Cota grátis: ~6 envios por dia por projeto do Google.</p>{% endif %}
     <div class="form-actions"><button class="btn primary">Salvar</button></div>
   </form>
+  <form id="randomize-{{ a.id }}" method="post" action="/publicar/contas/{{ a.id }}/sortear-estilo"></form>
   <form method="post" action="/publicar/contas/{{ a.id }}/desconectar" onsubmit="return confirm('Desconectar {{ a.name }}? Os agendados dela são cancelados.')">
     <button class="btn small danger">Desconectar</button>
   </form>

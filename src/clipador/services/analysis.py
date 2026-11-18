@@ -117,6 +117,8 @@ def enqueue_render(
     candidate_ids: list[int],
     kind: str = "final",
     priority: int = 0,
+    variant: dict | None = None,
+    account_id: int | None = None,
 ) -> tuple[Job | None, list, list]:
     """Create Render rows (reusing cached ones) and queue one job for the missing ones.
     Returns (job or None if everything was cached, to_render, reused).
@@ -126,7 +128,7 @@ def enqueue_render(
     if not candidate_ids:
         raise ValidationError("Escolha (ou aprove) pelo menos um candidato para renderizar.")
     todo, reused = rendering.request_renders(
-        session, session.get_bind(), settings, candidate_ids, kind
+        session, session.get_bind(), settings, candidate_ids, kind, variant, account_id
     )
     for r in todo:
         waiting = session.get(Job, r.job_id) if r.job_id is not None else None

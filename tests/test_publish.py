@@ -194,8 +194,11 @@ def test_publish_rules(ysettings, engine, tmp_path):
         publishing.request_publication(s, ysettings, cid, 0, privacy="public")
     acc = _connect(engine)
     with Session(engine) as s:
-        with pytest.raises(Exception, match="Renderize o corte final"):
-            publishing.request_publication(s, ysettings, cid, acc, privacy="public")
+        # no final render yet: it is queued and the post waits for it (no error)
+        pub = publishing.request_publication(s, ysettings, cid, acc, privacy="public")
+        assert pub.status == PublicationStatus.SCHEDULED
+        assert s.get(Render, pub.render_id).status == RenderStatus.QUEUED
+        s.rollback()
         c = s.get(Candidate, cid)
         c.status = CandidateStatus.SUGGESTED
         s.add(c)

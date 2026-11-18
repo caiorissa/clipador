@@ -13,7 +13,6 @@ posting in its API: it is uploaded at the slot (the worker must be running).
 
 from __future__ import annotations
 
-import contextlib
 from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
@@ -30,6 +29,9 @@ from clipador.models import (
     PostDraft,
     Publication,
     PublicationStatus,
+    Render,
+    RenderKind,
+    RenderStatus,
     SocialAccount,
     Source,
 )
@@ -113,7 +115,11 @@ def upsert_account(
         )
     ).first()
     if acc is None:
+        from clipador.render import variants
+
         acc = SocialAccount(platform=platform, external_id=external_id, name=name)
+        # a look different from every other account, so they never post the same file
+        acc.render_style = variants.suggest([a.render_style for a in accounts(session)])
         if platform == "tiktok":
             acc.privacy = "private"  # unaudited apps can only post privately
     acc.name, acc.credentials, acc.active = name or acc.name, token, True
@@ -322,6 +328,56 @@ def _title_variant(session: Session, c: Candidate, d: PostDraft | None) -> str:
     return base
 
 
+def account_render(
+    session: Session, settings: Settings, acc: SocialAccount, c: Candidate
+) -> tuple[Render | None, bool]:
+    """The file this account posts for clip `c`, and whether it is ready. An account with an
+    edit style gets its OWN render (queued here when missing), so no two accounts post the
+    same file. Returns (None, False) when nothing can be rendered (e.g. the video is gone)."""
+    from clipador.render import variants
+    from clipador.services import analysis, publishing
+
+    if variants.is_default(acc.render_style):
+        r = publishing.final_render(session, settings, c.id)
+        if r is not None:
+            return r, True
+        style, acc_id = None, None
+    else:
+        style, acc_id = variants.normalize(acc.render_style), acc.id
+        rows = session.exec(
+            select(Render)
+            .where(
+                Render.candidate_id == c.id,
+                Render.kind == RenderKind.FINAL,
+                Render.account_id == acc.id,
+            )
+            .order_by(col(Render.id).desc())
+        ).all()
+        for r in rows:
+            if r.variant != style:
+                continue  # made with an older style of this account
+            if r.status == RenderStatus.DONE and r.path and settings.abs_path(r.path).is_file():
+                return r, True
+            if r.status in (RenderStatus.QUEUED, RenderStatus.RUNNING):
+                return r, False
+    try:
+        _job, todo, reused = analysis.enqueue_render(
+            session,
+            settings,
+            c.source_id,
+            [c.id],
+            "final",
+            priority=4,
+            variant=style,
+            account_id=acc_id,
+        )
+    except Exception:  # video gone, etc.
+        return None, False
+    if reused:
+        return reused[0], True
+    return (todo[0], False) if todo else (None, False)
+
+
 def taken_times(session: Session, acc_id: int) -> list[datetime]:
     pubs = session.exec(
         select(Publication).where(
@@ -429,7 +485,7 @@ def autopost_tick(
     session: Session, settings: Settings, now: datetime | None = None, tz: tzinfo | None = None
 ) -> list[str]:
     """Schedule newly approved clips and queue the uploads that are due. Does not commit."""
-    from clipador.services import analysis, publishing
+    from clipador.services import publishing
     from clipador.worker import queue
 
     now = aware(now) or utcnow()
@@ -440,12 +496,8 @@ def autopost_tick(
         taken = taken_times(session, acc.id)
         proj_cap = settings.youtube_uploads_per_project_day if acc.project_id else None
         for c in _candidates_for(session, acc, now):
-            r = publishing.final_render(session, settings, c.id)
-            if r is None:  # approve -> the final render is (or will be) on its way
-                if c.status == CandidateStatus.APPROVED:
-                    # video gone etc.: the clip just isn't posted
-                    with contextlib.suppress(Exception):
-                        analysis.enqueue_render(session, settings, c.source_id, [c.id], "final")
+            r, _ready = account_render(session, settings, acc, c)
+            if r is None:  # nothing to render (video gone): the clip just isn't posted
                 continue
             pub = new_publication(session, acc, c, r.id, privacy=acc.privacy, auto=True)
             reason = hold_reason(session, c) if acc.hold_on_alerts else None
@@ -482,6 +534,14 @@ def autopost_tick(
         ahead = lead if p.platform == "youtube" else timedelta(0)
         if when - ahead > now:
             continue
+        r = session.get(Render, p.render_id)
+        if r is None or r.status in (RenderStatus.FAILED, RenderStatus.CANCELED):
+            p.status, p.updated_at = PublicationStatus.FAILED, utcnow()
+            p.error = "O render da versão desta conta falhou; renderize de novo e poste."
+            session.add(p)
+            continue
+        if r.status != RenderStatus.DONE:
+            continue  # this account's edit is still rendering: posts when it's ready
         if (
             acc.project_id
             and project_uploads_today(session, acc.project_id, now)

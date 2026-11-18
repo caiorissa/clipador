@@ -92,6 +92,16 @@ def apply_jump_cuts(plan: RenderPlan, settings: Settings, log=lambda m: None) ->
     return replace(plan, words=words, zoom_peak=peak, keeps=keeps)
 
 
+def apply_speed(plan: RenderPlan) -> RenderPlan:
+    """Account style speed: caption times and the zoom peak follow the faster playback."""
+    sp = plan.speed or 1.0
+    if abs(sp - 1.0) < 1e-6:
+        return plan
+    words = [replace(w, start=w.start / sp, end=w.end / sp) for w in plan.words]
+    peak = plan.zoom_peak / sp if plan.zoom_peak is not None else None
+    return replace(plan, words=words, zoom_peak=peak)
+
+
 def hwaccel_args(settings: Settings) -> list[str]:
     """Optional hardware DECODING of the source (CLIPADOR_RENDER_HWACCEL). Frames come back to
     system memory, so the filters are unchanged. Off by default: measured on an M4, the copy
@@ -155,6 +165,8 @@ class RenderPlan:
     window: Any = None  # services.live.SegmentWindow (built lazily before encoding)
     cut_silences: bool = False  # jump cuts (decided at render time from the clip's audio)
     keeps: list[tuple[float, float]] | None = None  # spans kept by the jump cuts
+    grade: str = ""  # account style: ffmpeg color filters on the 9:16 frame
+    speed: float = 1.0  # account style: playback speed (audio pitch kept)
 
     @property
     def duration(self) -> float:
@@ -162,8 +174,9 @@ class RenderPlan:
 
     @property
     def out_duration(self) -> float:
-        """Length of the rendered file (shorter than the source span with jump cuts)."""
-        return sum(b - a for a, b in self.keeps) if self.keeps else self.duration
+        """Length of the rendered file (shorter than the source span with jump cuts / speed)."""
+        base = sum(b - a for a, b in self.keeps) if self.keeps else self.duration
+        return base / (self.speed or 1.0)
 
     @property
     def seek(self) -> float:
@@ -178,8 +191,18 @@ def out_size(settings: Settings, kind: str) -> tuple[int, int]:
 
 
 def plan_render(
-    session: Session, engine: Engine, settings: Settings, c: Candidate, kind: str = "final"
+    session: Session,
+    engine: Engine,
+    settings: Settings,
+    c: Candidate,
+    kind: str = "final",
+    variant: dict[str, Any] | None = None,
 ) -> RenderPlan:
+    """`variant` = a social account's edit style (render/variants.py): its own layout, captions,
+    color, speed, zoom, trim and opening title, so each account posts a different file."""
+    from clipador.render import variants
+
+    va = variants.normalize(variant) if variant and not variants.is_default(variant) else None
     source = session.get(Source, c.source_id)
     if source is None:
         raise ClipadorError("A fonte deste candidato não existe mais.")
@@ -207,6 +230,8 @@ def plan_render(
     src_len = (source.media_info or {}).get("duration") or source.duration_seconds
     if window is None and src_len and end > float(src_len):
         end = max(start + 0.5, float(src_len) - 0.05)
+    if va and va["trim_start"]:  # this account's version starts a little later
+        start = min(start + va["trim_start"], max(start, end - settings.clip_min_seconds))
     # glossary -> valid per-word corrections; the resulting words go into the params hash, so a
     # glossary change only invalidates the renders whose captions it actually changes.
     words, _stale = caption_words(
@@ -215,21 +240,39 @@ def plan_render(
         c.caption_override_originals,
     )  # fmt: skip
     rect = streamer.facecam_rect if streamer else None
-    wanted = c.render_layout or (streamer.default_layout if streamer else "blur")
+    wanted = (
+        (va and va["layout"])
+        or c.render_layout
+        or (streamer.default_layout if streamer else "blur")
+    )
     layout, layout_warning = filters.resolve_layout(wanted, rect)
     style_key = (
-        c.render_style
+        (va and va["caption_style"])
+        or c.render_style
         or (streamer.default_caption_style if streamer else None)
         or settings.render_style
     )
     style = get_style(style_key, settings.caption_styles_path)
     o = c.render_options or {}
     opts = filters.LayoutOptions(zoom=float(o.get("zoom", 1.0)), foco_x=float(o.get("foco_x", 0.5)))
+    if va:
+        opts = filters.LayoutOptions(zoom=max(opts.zoom, 1.0) * va["zoom"], foco_x=va["foco_x"])
 
     show_opening = o.get("opening", streamer.show_opening_text if streamer else True)
     show_credit = o.get("credit", streamer.show_credit if streamer else True)
+    if va:
+        show_opening = show_opening and va["opening"] != "nenhum"
+        show_credit = show_credit and va["credit"]
     opening = None
-    if show_opening:
+    if show_opening and va and va["opening"] in ("t1", "t2", "t3"):
+        e = session.exec(
+            select(CandidateEnrichment).where(CandidateEnrichment.candidate_id == c.id)
+        ).first()
+        titles = [t for t in (e.titulos if e and e.titulos else []) if t]
+        idx = int(va["opening"][1]) - 1
+        if titles:
+            opening = truncate_words(titles[min(idx, len(titles) - 1)], TITLE_MAX)
+    if opening is None and show_opening:
         if c.overlay_title is not None:
             opening = c.overlay_title.strip() or None
         else:
@@ -248,6 +291,8 @@ def plan_render(
         else None
     )
     peak_on = o.get("peak_zoom", True) and settings.zoom_amount > 0
+    if va:
+        peak_on = peak_on and va["peak_zoom"]
     cut = bool(o.get("cut_silences", settings.render_cut_silences))
     peak = c.peak_t - start if peak_on and start <= c.peak_t <= end else None
     overlays = Overlays(opening, settings.opening_text_seconds, credit)
@@ -272,11 +317,16 @@ def plan_render(
         params["file"] = window.key
     if cut:  # only when on, so renders made without it keep their hash
         params["jumpcut"] = [1, asdict(settings_cut_params(settings))]
+    grade = variants.GRADES[va["grade"]][1] if va else ""
+    speed = va["speed"] if va else 1.0
+    if va:
+        params["variant"] = va
     name = f"{c.rank:02d}_{format_hms(start).replace(':', '')}"
     return RenderPlan(
         c.id, source.id, kind, video, start, end, src_w, src_h, fps, layout, style.key, words,
         rect if layout == "facecam_embaixo" else None, opts, peak, overlays, name, warnings,
         params_hash(params), params, window.offset if window else 0.0, window, cut,
+        grade=grade, speed=speed,
     )  # fmt: skip
 
 
@@ -284,15 +334,22 @@ def plan_render(
 
 
 def request_renders(
-    session: Session, engine: Engine, settings: Settings, candidate_ids: list[int], kind: str
+    session: Session,
+    engine: Engine,
+    settings: Settings,
+    candidate_ids: list[int],
+    kind: str,
+    variant: dict[str, Any] | None = None,
+    account_id: int | None = None,
 ) -> tuple[list[Render], list[Render]]:
-    """Create (or reuse) Render rows. Returns (to_render, reused_done)."""
+    """Create (or reuse) Render rows. Returns (to_render, reused_done). `variant` +
+    `account_id`: that account's own edit of the clips (its edit style)."""
     todo, reused = [], []
     for cid in candidate_ids:
         c = session.get(Candidate, cid)
         if c is None:
             continue
-        plan = plan_render(session, engine, settings, c, kind)
+        plan = plan_render(session, engine, settings, c, kind, variant)
         existing = session.exec(
             select(Render).where(
                 Render.candidate_id == cid, Render.kind == kind, Render.params_hash == plan.phash
@@ -313,7 +370,9 @@ def request_renders(
             todo.append(pending)
             continue
         row = Render(candidate_id=cid, source_id=c.source_id, kind=kind, params_hash=plan.phash,
-                     params=plan.params, warning=" ".join(plan.warnings) or None)  # fmt: skip
+                     params=plan.params, warning=" ".join(plan.warnings) or None,
+                     account_id=account_id if plan.params.get("variant") else None,
+                     variant=plan.params.get("variant"))  # fmt: skip
         session.add(row)
         session.flush()
         todo.append(row)
@@ -355,12 +414,20 @@ def build_args(plan: RenderPlan, settings: Settings, encoder: str, audio_filter:
                out: Path) -> list[str]:  # fmt: skip
     graph = filters.vertical_graph(
         plan.layout, plan.src_w, plan.src_h, plan.out_duration,
-        filters.Zoom(plan.zoom_peak, settings.zoom_amount), audio_filter,
+        filters.Zoom(plan.zoom_peak, settings.zoom_amount), audio_filter, grade=plan.grade,
         rect=plan.rect, opts=plan.opts, out_size=out_size(settings, plan.kind),
     )  # fmt: skip
+    # Inputs of the layout graph: [0:v]/[0:a], or the jump-cut / sped-up streams before it.
+    pre: list[str] = []
+    vin, ain = "[0:v]", "[0:a]"
     if plan.keeps:
-        cut_parts, vlabel, alabel = jumpcut.cut_filters(plan.keeps)
-        graph = ";".join([*cut_parts, graph.replace("[0:v]", vlabel).replace("[0:a]", alabel)])
+        cut_parts, vin, ain = jumpcut.cut_filters(plan.keeps)
+        pre += cut_parts
+    if plan.speed and abs(plan.speed - 1.0) > 1e-6:  # account style: faster, same voice pitch
+        pre += [f"{vin}setpts=PTS/{plan.speed:.4f}[spv]", f"{ain}atempo={plan.speed:.4f}[spa]"]
+        vin, ain = "[spv]", "[spa]"
+    if pre:
+        graph = ";".join([*pre, graph.replace("[0:v]", vin).replace("[0:a]", ain)])
     return [*hwaccel_args(settings), "-ss", f"{plan.seek:.3f}", "-t", f"{plan.duration:.3f}",
             "-i", str(plan.video), "-filter_complex", graph, "-map", "[v]", "-map", "[a]",
             *filters.output_rate_args(
@@ -411,7 +478,7 @@ def execute_render(
             from clipador.services import live
 
             live.ensure_window_video(plan.window, settings.ffmpeg_path)
-        plan = apply_jump_cuts(plan, settings, log)
+        plan = apply_speed(apply_jump_cuts(plan, settings, log))
         encoder = resolve_encoder(settings)
         gain = None
         if plan.kind == RenderKind.FINAL:

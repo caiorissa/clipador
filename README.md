@@ -353,6 +353,17 @@ a meia-noite do Pacífico (quando o Google renova a cota).
 
 **TikTok:** até 15 posts por dia por conta.
 
+### Estilo de edição por conta
+
+Postar **o mesmo arquivo** em vários perfis é o que as redes detectam como conteúdo repetido (e
+deixam de entregar). Por isso cada conta tem o seu **estilo de edição** (Publicar → conta →
+🎨): layout, estilo de legenda, cor, velocidade (1,03–1,1x, sem mudar o tom da voz), zoom e
+enquadramento, começar o clip alguns décimos depois, qual título da IA vai na abertura, crédito
+e zoom no pico. Ao postar, o Clipador **renderiza a versão daquela conta** e só envia quando
+ela fica pronta, então cada perfil recebe um arquivo diferente (imagem, áudio, duração, legenda
+e título). Contas novas já recebem um estilo diferente das outras; "🎲 Sortear outro estilo"
+troca por outro.
+
 ### Configurar o TikTok (uma vez, grátis)
 
 1. <https://developers.tiktok.com> → **Manage apps** → crie um app.

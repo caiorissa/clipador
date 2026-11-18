@@ -522,3 +522,7 @@ table.checks td:nth-child(2) { white-space: nowrap; width: 14rem; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) { .approved-grid { grid-template-columns: 1fr; } .ap-card { grid-template-columns: 1fr; } .ap-media video, .ap-placeholder { width: 100%; max-width: 260px; } }
 table.jobs td:has(.error-text), table.jobs td:has(.warn-text) { min-width: 18rem; }
+.style-box { margin: .75rem 0; background: rgba(139,92,246,.04); border-color: rgba(139,92,246,.3); }
+.style-box legend { font-size: .9rem; }
+.style-box label { display: block; color: var(--muted); font-size: .82rem; }
+.style-box select, .style-box input:not([type=checkbox]) { display: block; width: 100%; margin-top: .25rem; padding: .45rem .55rem; }
