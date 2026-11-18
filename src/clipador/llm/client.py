@@ -188,6 +188,9 @@ class ClaudeCodeClient:
         return exe
 
     def list_models(self) -> list[str]:
+        paused = claude_paused(self.settings)
+        if paused:
+            raise LLMUnavailable(paused, "A IA volta sozinha quando o limite renovar.")
         exe = self._exe()
         try:
             r = subprocess.run([exe, "auth", "status"], capture_output=True, text=True,
@@ -253,16 +256,18 @@ class ClaudeCodeClient:
         return LLMResponse(content=content, latency_ms=latency, prompt_tokens=prompt_tokens,
                            output_tokens=usage.get("output_tokens"))  # fmt: skip
 
-    @staticmethod
-    def _failure(text: str) -> LLMError:
-        low = text.lower()
-        if any(
-            k in low for k in ("usage limit", "rate limit", "limit reached", "429", "overloaded")
-        ):
+    def _failure(self, text: str) -> LLMError:
+        if is_limit_message(text):
+            when = _reset_hint(text)
+            pause_claude(self.settings, text)
             return LLMUnavailable(
-                "Limite de uso da sua assinatura do Claude atingido por agora.",
-                "Espere o limite renovar, ou use CLIPADOR_LLM_BACKEND=ollama nesse meio-tempo.",
+                "Limite de uso da sua assinatura do Claude atingido"
+                + (f" (renova {when})" if when else " por agora")
+                + ".",
+                "Os clips sem nota da IA são avaliados quando o limite renovar; até lá vale a "
+                "nota da detecção. Ou use CLIPADOR_LLM_BACKEND=ollama nesse meio-tempo.",
             )
+        low = text.lower()
         if any(k in low for k in ("not logged", "log in", "login", "authentication", "401")):
             return LLMUnavailable("O Claude Code não está logado.", LOGIN_HINT)
         return LLMError(f"Claude Code: {text.strip()[:300]}")
@@ -271,9 +276,54 @@ class ClaudeCodeClient:
         """Nothing to free: Claude runs in Anthropic's cloud."""
 
 
+def is_limit_message(text: str) -> bool:
+    """'You've hit your 5-hour limit · resets 2:40pm', 'usage limit reached', 429, overloaded."""
+    low = text.lower()
+    if any(k in low for k in ("429", "overloaded", "rate limit", "usage limit")):
+        return True
+    return "limit" in low and any(k in low for k in ("hit", "reset", "reached", "exceeded"))
+
+
+def _reset_hint(text: str) -> str:
+    import re
+
+    m = re.search(r"resets?\s+(?:at\s+)?([0-9][0-9:]*\s*(?:am|pm)?)", text, re.IGNORECASE)
+    return f"às {m.group(1).strip()}" if m else ""
+
+
+PAUSE_MINUTES = 20  # after a limit: don't call Claude again for a while (no wasted calls)
+
+
+def _pause_file(settings: Settings) -> Path:
+    return settings.data_dir / "claude_limit.json"
+
+
+def pause_claude(settings: Settings, text: str) -> None:
+    with contextlib.suppress(OSError):
+        _pause_file(settings).write_text(
+            json.dumps({"until": time.time() + PAUSE_MINUTES * 60, "message": text.strip()[:300]}),
+            "utf-8",
+        )
+
+
+def claude_paused(settings: Settings) -> str | None:
+    """PT-BR message while the subscription limit pause is on, else None."""
+    try:
+        data = json.loads(_pause_file(settings).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if data.get("until", 0) <= time.time():
+        return None
+    when = _reset_hint(data.get("message", ""))
+    return (
+        "Limite de uso da sua assinatura do Claude atingido"
+        + (f" (renova {when})" if when else "")
+        + "."
+    )
+
+
 CLAUDE_PREFIX = "claude:"
 LOGIN_HINT = "Abra um terminal, rode `claude` e entre na sua conta."
-LIMIT_WORDS = ("usage limit", "rate limit", "limit reached", "429", "overloaded")
 CLAUDE_MODELS = ("sonnet", "opus", "haiku")
 
 

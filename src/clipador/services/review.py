@@ -568,13 +568,23 @@ def order_key(order: str):
     return keys.get(order, keys["rank"])
 
 
-def below_live_minimum(c: Candidate, mins: dict[int, float]) -> bool:
-    """A live clip whose (final, else detection) score is under its session's 'nota mínima'.
-    Decided clips are always shown."""
-    if not c.live_session_id or c.status not in (CandidateStatus.SUGGESTED,
-                                                 CandidateStatus.SKIPPED):  # fmt: skip
-        return False
-    return _score(c) < mins.get(c.live_session_id, 0.0)
+LIVE_TOP_N = 5  # the best N pending clips of every live always show up in the review
+
+
+def hidden_live_clips(cands: list[Candidate], mins: dict[int, float]) -> set[int]:
+    """Pending live clips kept out of the review: under the session's 'nota mínima' AND not
+    among the session's best LIVE_TOP_N. So every live shows its best moments, without the
+    hundreds of weak candidates a long live produces."""
+    pending = [c for c in cands if c.live_session_id
+               and c.status in (CandidateStatus.SUGGESTED, CandidateStatus.SKIPPED)]  # fmt: skip
+    by_live: dict[int, list[Candidate]] = {}
+    for c in pending:
+        by_live.setdefault(c.live_session_id, []).append(c)
+    hidden: set[int] = set()
+    for lid, rows in by_live.items():
+        rows.sort(key=lambda c: -_score(c))
+        hidden |= {c.id for c in rows[LIVE_TOP_N:] if _score(c) < mins.get(lid, 0.0)}
+    return hidden
 
 
 def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
@@ -614,7 +624,8 @@ def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
             if ids
             else {}
         )
-        cands = [c for c in cands if not below_live_minimum(c, mins)]
+        hidden = hidden_live_clips(cands, mins)
+        cands = [c for c in cands if c.id not in hidden]
     if f.min_score is not None:
         cands = [c for c in cands if _score(c) >= f.min_score]
     key = order_key(f.order)

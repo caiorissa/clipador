@@ -450,10 +450,30 @@ def stats(session: Session, settings: Settings, ls: LiveSession) -> dict[str, An
         "expired": sum(g.status == SegmentStatus.EXPIRED for g in segs),
         "recording": next((g for g in segs if g.status == SegmentStatus.RECORDING), None),
         "candidates": len(cands),
+        "in_review": _in_review(cands, ls),
+        "ai_scored": _ai_scored(session, [c.id for c in cands]),
         "auto_clipped": sum(c.auto_clipped for c in cands),
         "heartbeat_age": (utcnow() - hb).total_seconds() if hb else None,
         "dead": is_dead(ls, settings),
     }
+
+
+def _in_review(cands: list[Candidate], ls: LiveSession) -> int:
+    """How many of the session's clips the review shows (best few + above the minimum)."""
+    from clipador.services.review import PENDING_STATUSES, hidden_live_clips
+
+    hidden = hidden_live_clips(list(cands), {ls.id: ls.min_score})
+    return sum(1 for c in cands if c.id not in hidden and c.status in PENDING_STATUSES)
+
+
+def _ai_scored(session: Session, ids: list[int]) -> int:
+    from clipador.models import CandidateEnrichment, EnrichStatus
+
+    if not ids:
+        return 0
+    return len(session.exec(select(CandidateEnrichment.id).where(
+        col(CandidateEnrichment.candidate_id).in_(ids),
+        CandidateEnrichment.status == EnrichStatus.OK)).all())  # fmt: skip
 
 
 def pending_auto_clips(session: Session) -> list[Candidate]:

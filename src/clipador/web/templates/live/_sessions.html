@@ -36,7 +36,9 @@
         {% if st.failed %}· <span class="error-text">{{ st.failed }} falharam</span>{% endif %}
         {% if st.recording %}<div class="muted">gravando o segmento {{ st.recording.index }}</div>{% endif %}
       </td>
-      <td class="small">{{ st.candidates }} candidatos
+      <td class="small">
+        {% if r.source %}<a href="/revisao?status=ao_vivo&fonte={{ r.source.id }}"><strong>{{ st.in_review }} na Revisão</strong></a>{% else %}{{ st.in_review }} na Revisão{% endif %}
+        <div class="muted">{{ st.candidates }} candidatos · {{ st.ai_scored }} com nota da IA{% if r.source %} · <a href="/revisao?status=todos&fonte={{ r.source.id }}">ver todos</a>{% endif %}</div>
         {% if st.auto_clipped %}<div><span class="badge auto">{{ st.auto_clipped }} acima de {{ ls.min_score|round|int }}</span></div>{% endif %}
       </td>
       <td class="actions">

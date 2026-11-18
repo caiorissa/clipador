@@ -271,7 +271,8 @@ class EnrichStage(Stage):
                     ctx.log(note)
         except llm_client.LLMUnavailable as e:
             ctx.log(
-                f"Ollama caiu no meio do estágio: {e.message} Os candidatos restantes ficam sem IA."
+                f"A IA ficou indisponível no meio do estágio: {e.message} Os candidatos restantes "
+                "ficam sem nota da IA e são avaliados numa próxima vez."
             )
         finally:
             client.unload(model)

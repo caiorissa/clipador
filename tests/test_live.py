@@ -457,21 +457,25 @@ class _FakeYt:
         return []
 
 
-def test_review_hides_live_clips_below_the_session_minimum(engine, lsettings):
+def test_review_shows_each_lives_best_clips_plus_those_above_the_minimum(engine, lsettings):
     from clipador.services import review
 
     st = _streamer(engine, handle="minimo")
     with Session(engine, expire_on_commit=False) as s:
         ls = live.create_session(s, lsettings, streamer_id=st, url="https://www.twitch.tv/minimo",
                                  options=live.LiveOptions(300, True, 70.0))  # fmt: skip
-        for i, sc in enumerate((54.0, 82.0)):
+        scores = [20.0, 30.0, 35.0, 40.0, 45.0, 50.0, 54.0, 82.0]
+        for i, sc in enumerate(scores):
             s.add(Candidate(source_id=ls.source_id, analysis_run_id=ls.run_id, rank=i + 1,
                             start=10 + 50 * i, end=40 + 50 * i, peak_t=20 + 50 * i, score=sc,
                             live_session_id=ls.id))  # fmt: skip
         s.commit()
-        shown = review.scope(s, review.ReviewFilters(status="ao_vivo"))
-        assert [c.score for c in shown] == [82.0]
-        assert len(review.scope(s, review.ReviewFilters(status="todos"))) == 2
+        shown = sorted(c.score for c in review.scope(s, review.ReviewFilters(status="ao_vivo")))
+        # the 5 best of the live (82 is also above the minimum); the weakest 3 stay hidden
+        assert shown == [40.0, 45.0, 50.0, 54.0, 82.0]
+        assert len(review.scope(s, review.ReviewFilters(status="todos"))) == len(scores)
+        stats = live.stats(s, lsettings, s.get(LiveSession, ls.id))
+        assert stats["in_review"] == 5 and stats["candidates"] == 8
 
 
 def test_claude_enrich_does_not_wait_for_the_gpu(engine):

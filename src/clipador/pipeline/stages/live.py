@@ -167,6 +167,20 @@ def apply_auto_clip(s, settings, ls: LiveSession) -> list[Candidate]:
     return hits
 
 
+def _unscored(s, live_id: int, skip: set[int], limit: int = 20) -> list[int]:
+    """Clips of the session the AI hasn't scored yet (e.g. the subscription limit was hit):
+    retried with the next segment, best detection score first."""
+    from clipador.models import CandidateEnrichment, EnrichStatus
+
+    ok = {e.candidate_id for e in s.exec(select(CandidateEnrichment).where(
+        CandidateEnrichment.status == EnrichStatus.OK)).all()}  # fmt: skip
+    rows = s.exec(select(Candidate).where(
+        Candidate.live_session_id == live_id,
+        col(Candidate.status).in_([CandidateStatus.SUGGESTED, CandidateStatus.SKIPPED]),
+    ).order_by(col(Candidate.score).desc())).all()  # fmt: skip
+    return [c.id for c in rows if c.id not in ok and c.id not in skip][:limit]
+
+
 def _llm_up(settings) -> bool:
     try:
         from clipador.llm.client import ollama_status
@@ -289,10 +303,11 @@ class LiveAnalyzeStage(Stage):
                 s.add(run)
             from clipador.worker import queue
 
-            llm = bool(touched) and _llm_up(settings)
+            to_score = [c.id for c in touched] + _unscored(s, ls.id, {c.id for c in touched})
+            llm = bool(to_score) and _llm_up(settings)
             if llm:  # the AI scores them; auto-clip runs at the end of that job
                 queue.enqueue(s, "enrich", ls.source_id,
-                              {"run_id": ls.run_id, "candidate_ids": [c.id for c in touched],
+                              {"run_id": ls.run_id, "candidate_ids": to_score,
                                "live_session_id": ls.id},
                               dedupe=False, priority=live.ANALYZE_PRIORITY)  # fmt: skip
             clipped = [] if llm else apply_auto_clip(s, settings, ls)

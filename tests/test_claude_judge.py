@@ -30,6 +30,10 @@ with open(log, "a") as f:
 if mode == "limit":
     print(json.dumps({{"is_error": True, "subtype": "error", "result": "Claude AI usage limit reached"}}))
     sys.exit(1)
+if mode == "limit5h":
+    print(json.dumps({{"is_error": True, "subtype": "success",
+                       "result": "You've hit your 5-hour limit · resets 2:40pm (America/Sao_Paulo)"}}))
+    sys.exit(1)
 answer = json.loads(os.environ["FAKE_CLAUDE_ANSWER"])
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                    "structured_output": answer, "result": json.dumps(answer),
@@ -88,6 +92,7 @@ def test_limits_and_login_are_clear(settings, fake_claude, monkeypatch):
     with pytest.raises(llm_client.LLMUnavailable, match="Limite de uso"):
         c.chat("claude:sonnet", [{"role": "user", "content": "x"}], schema=None, temperature=0,
                num_ctx=0, keep_alive=0, timeout=30)  # fmt: skip
+    (settings.data_dir / "claude_limit.json").unlink(missing_ok=True)  # pause over
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "logout")
     with pytest.raises(llm_client.LLMUnavailable, match="não está logado"):
         c.list_models()
@@ -132,3 +137,22 @@ def test_enrich_stage_with_claude(asettings, engine, fake_tx, fake_claude):
     assert (
         "O que vale um corte" in calls()[0]["args"][calls()[0]["args"].index("--system-prompt") + 1]
     )
+
+
+def test_subscription_limit_pauses_claude(settings, fake_claude, monkeypatch):
+    """'You've hit your 5-hour limit · resets 2:40pm' stops the AI step (no clip marked as
+    failed) and pauses further calls for a while."""
+    exe, calls = fake_claude
+    s = _settings(settings, exe)
+    assert llm_client.is_limit_message("You've hit your 5-hour limit · resets 2:40pm (X)")
+    assert not llm_client.is_limit_message("JSON inválido")
+    c = llm_client.make_llm_client(s)
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "limit5h")
+    with pytest.raises(llm_client.LLMUnavailable, match="renova às 2:40pm"):
+        c.chat("claude:sonnet", [{"role": "user", "content": "x"}], schema=None, temperature=0,
+               num_ctx=0, keep_alive=0, timeout=30)  # fmt: skip
+    n = len(calls())
+    with pytest.raises(llm_client.LLMUnavailable, match="Limite de uso"):
+        c.list_models()  # paused: no new call to Claude
+    assert len(calls()) == n
+    assert not llm_client.ollama_status(s).ok
