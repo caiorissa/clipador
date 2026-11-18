@@ -27,10 +27,11 @@ def _count(session: Session, q) -> int:
     return int(session.exec(q).one() or 0)
 
 
-def nav_counts(engine: Engine) -> dict[str, int]:
-    """Small badges in the sidebar. Never raises (the menu must always render)."""
+def nav_counts(engine: Engine, settings=None) -> dict[str, int]:
+    """Small badges in the sidebar (+ "worker": 1/0). Never raises (the menu must render)."""
     try:
         from clipador.services import review
+        from clipador.worker.runner import worker_alive
 
         with Session(engine) as s:
             prog = review.progress(s, review.ReviewFilters())
@@ -49,6 +50,9 @@ def nav_counts(engine: Engine) -> dict[str, int]:
                     col(Job.status).in_([JobStatus.RUNNING, JobStatus.QUEUED]))),
                 "jobs_failed": _count(s, select(func.count()).select_from(Job).where(
                     Job.status == JobStatus.FAILED, Job.updated_at >= day_ago)),
+                "jobs_queued": _count(s, select(func.count()).select_from(Job).where(
+                    Job.status == JobStatus.QUEUED)),
+                "worker": int(worker_alive(settings)) if settings is not None else 1,
             }  # fmt: skip
     except Exception:
         return {}

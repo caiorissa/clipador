@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import socket
@@ -105,6 +106,24 @@ class _Reporter:
 
 
 LIVE_SUPERVISE_SECONDS = 10.0
+ALIVE_SECONDS = 5.0  # the worker touches data/worker.alive this often (web: "worker parado")
+
+
+def alive_path(settings: Settings) -> Path:
+    return settings.data_dir / "worker.alive"
+
+
+def touch_alive(settings: Settings) -> None:
+    with contextlib.suppress(OSError):
+        alive_path(settings).write_text(str(int(time.time())), "utf-8")
+
+
+def worker_alive(settings: Settings, max_age: float = 30.0) -> bool:
+    """True when a worker touched data/worker.alive in the last `max_age` seconds."""
+    try:
+        return time.time() - alive_path(settings).stat().st_mtime < max_age
+    except OSError:
+        return False
 
 
 class Worker:
@@ -144,12 +163,15 @@ class Worker:
                 self.worker_id,
                 self.settings.worker_concurrency,
             )
-            last_beat = last_recover = last_live = last_autopost = 0.0
+            last_beat = last_recover = last_live = last_autopost = last_alive = 0.0
             last_metrics = time.monotonic() - 3600 * self.settings.youtube_metrics_hours + 120
             last_watch = time.monotonic() - self.settings.live_watch_interval_seconds + 15
             while not self.stopping.is_set():
                 started = self.tick()
                 now = time.monotonic()
+                if now - last_alive >= ALIVE_SECONDS:
+                    touch_alive(self.settings)
+                    last_alive = now
                 if now - last_live >= LIVE_SUPERVISE_SECONDS:
                     self._live_supervise()
                     last_live = now

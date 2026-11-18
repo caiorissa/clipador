@@ -218,7 +218,9 @@ tr.inactive td { opacity: .55; }
 .source-title a { color: var(--text); font-weight: 600; }
 .thumb img, .thumb-placeholder { width: 160px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: var(--panel-2); display: block; }
 .thumb-placeholder { display: grid; place-items: center; color: var(--muted); font-size: .8rem; }
-.source-body, .flash, td { overflow-wrap: anywhere; min-width: 0; }
+.source-body, .flash { overflow-wrap: anywhere; min-width: 0; }
+td { overflow-wrap: break-word; min-width: 0; }
+table.jobs td:nth-child(-n+2) { white-space: nowrap; }
 .source-title { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; margin-bottom: .2rem; }
 .source-status { text-align: right; display: grid; gap: .4rem; justify-items: end; }
 
@@ -481,3 +483,10 @@ kbd { font-family: ui-monospace, Consolas, monospace; font-size: .8em; padding: 
 table.checks td:first-child { white-space: nowrap; width: 1%; }
 table.checks td:nth-child(2) { white-space: nowrap; width: 14rem; }
 @media (max-width: 960px) { table.checks td:nth-child(2) { white-space: normal; width: auto; } }
+
+/* worker status (sidebar) */
+.worker-state { margin-top: auto; display: flex; align-items: center; gap: .5rem; padding: .55rem .65rem; border-radius: 8px; font-size: .8rem; color: var(--muted); border: 1px solid var(--border); }
+.worker-state .ws-dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
+.worker-state.off { color: #fcd34d; border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.06); }
+.worker-state.off .ws-dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(245,158,11,.2); animation: pulse 1.4s infinite; }
+@media (max-width: 960px) { .worker-state { display: none; } }

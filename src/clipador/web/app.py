@@ -38,7 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         int(p.stat().st_mtime) for p in STATIC_DIR.glob("*.*") if p.is_file()
     )
     engine = app.state.engine
-    templates.env.globals["nav_counts"] = lambda: nav_counts(engine)
+    templates.env.globals["nav_counts"] = lambda: nav_counts(engine, settings)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     for module in (

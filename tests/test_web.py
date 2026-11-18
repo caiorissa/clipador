@@ -180,3 +180,15 @@ def test_data_file_serving_blocks_traversal(client, settings):
     assert client.get("/arquivos/vods/t.jpg").content == b"jpg"
     assert client.get("/arquivos/../pyproject.toml").status_code == 404
     assert client.get("/arquivos/..%2F..%2Fpyproject.toml").status_code == 404
+
+
+def test_worker_state_is_shown(client, settings):
+    from clipador.worker.runner import alive_path, touch_alive, worker_alive
+
+    alive_path(settings).unlink(missing_ok=True)
+    r = client.get("/fontes")
+    assert "O worker está parado" in r.text and "Worker parado" in r.text
+    touch_alive(settings)
+    assert worker_alive(settings)
+    r = client.get("/fontes")
+    assert "O worker está parado" not in r.text and "Worker rodando" in r.text
