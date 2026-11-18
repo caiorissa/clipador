@@ -423,7 +423,7 @@ def test_review_live_filter_puts_auto_clips_first(client, engine, lsettings):
         ls = live.create_session(s, lsettings, streamer_id=st, url="https://www.twitch.tv/fulano")
         for i, auto in enumerate((False, True)):
             s.add(Candidate(source_id=ls.source_id, analysis_run_id=ls.run_id, rank=i + 1,
-                            start=10 + 50 * i, end=40 + 50 * i, peak_t=20 + 50 * i, score=50,
+                            start=10 + 50 * i, end=40 + 50 * i, peak_t=20 + 50 * i, score=80,
                             live_session_id=ls.id, auto_clipped=auto))  # fmt: skip
         s.commit()
     from clipador.services import review
@@ -455,3 +455,33 @@ class _FakeYt:
 
     def common_args(self):
         return []
+
+
+def test_review_hides_live_clips_below_the_session_minimum(engine, lsettings):
+    from clipador.services import review
+
+    st = _streamer(engine, handle="minimo")
+    with Session(engine, expire_on_commit=False) as s:
+        ls = live.create_session(s, lsettings, streamer_id=st, url="https://www.twitch.tv/minimo",
+                                 options=live.LiveOptions(300, True, 70.0))  # fmt: skip
+        for i, sc in enumerate((54.0, 82.0)):
+            s.add(Candidate(source_id=ls.source_id, analysis_run_id=ls.run_id, rank=i + 1,
+                            start=10 + 50 * i, end=40 + 50 * i, peak_t=20 + 50 * i, score=sc,
+                            live_session_id=ls.id))  # fmt: skip
+        s.commit()
+        shown = review.scope(s, review.ReviewFilters(status="ao_vivo"))
+        assert [c.score for c in shown] == [82.0]
+        assert len(review.scope(s, review.ReviewFilters(status="todos"))) == 2
+
+
+def test_claude_enrich_does_not_wait_for_the_gpu(engine):
+    from clipador.worker import queue
+
+    with Session(engine) as s:
+        j = queue.enqueue(s, "enrich", None, {})
+        t = queue.enqueue(s, "transcribe", None, {})
+        s.commit()
+        assert j.needs_gpu and t.needs_gpu
+    assert queue.release_cloud_ai_from_gpu(engine) == 1
+    with Session(engine) as s:
+        assert not s.get(Job, j.id).needs_gpu and s.get(Job, t.id).needs_gpu

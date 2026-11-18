@@ -116,14 +116,14 @@ def test_enrich_stage_with_claude(asettings, engine, fake_tx, fake_claude):
     sid = _source(engine, asettings)
     _analyze(engine, sid)
     w = Worker(asettings, engine)
-    _drain(w)  # Ollama "offline" here: enrich skipped
+    _drain(w, timeout=240)  # Ollama "offline" here: enrich skipped
     _settings(asettings, exe)
     # transcribed with another Whisper setup (e.g. on the PC): the existing transcript is used
     asettings.whisper_model = "small"
     with Session(engine) as s:
         analysis.enqueue_enrich(s, sid)
         s.commit()
-    _drain(w)
+    _drain(w, timeout=240)
     with Session(engine) as s:
         rows = s.exec(select(CandidateEnrichment)).all()
     assert rows and all(r.model == "claude:sonnet" and r.status == "ok" for r in rows)

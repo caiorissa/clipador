@@ -288,6 +288,8 @@ class Worker:
         """Claim and start at most one job. Returns True if a job was started."""
         if len(self.active_job_ids()) >= self.settings.worker_concurrency:
             return False
+        if self.settings.llm_backend == "claude":
+            queue.release_cloud_ai_from_gpu(self.engine)
         gpu_free = self.gpu_lock.acquire(blocking=False)
         try:
             job = queue.claim(

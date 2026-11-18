@@ -568,6 +568,15 @@ def order_key(order: str):
     return keys.get(order, keys["rank"])
 
 
+def below_live_minimum(c: Candidate, mins: dict[int, float]) -> bool:
+    """A live clip whose (final, else detection) score is under its session's 'nota mínima'.
+    Decided clips are always shown."""
+    if not c.live_session_id or c.status not in (CandidateStatus.SUGGESTED,
+                                                 CandidateStatus.SKIPPED):  # fmt: skip
+        return False
+    return _score(c) < mins.get(c.live_session_id, 0.0)
+
+
 def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
     """Candidates of the latest analysis run of each source, filtered by everything but status,
     in queue order."""
@@ -591,6 +600,21 @@ def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
     if f.status == "ao_vivo":
         q = q.where(Candidate.live_session_id != None)  # noqa: E711
     cands = list(session.exec(q).all())
+    if f.status != "todos":  # live clips below their session's minimum score stay out of the way
+        from clipador.models import LiveSession
+
+        ids = {c.live_session_id for c in cands if c.live_session_id}
+        mins = (
+            {
+                ls.id: ls.min_score
+                for ls in session.exec(
+                    select(LiveSession).where(col(LiveSession.id).in_(ids))
+                ).all()
+            }
+            if ids
+            else {}
+        )
+        cands = [c for c in cands if not below_live_minimum(c, mins)]
     if f.min_score is not None:
         cands = [c for c in cands if _score(c) >= f.min_score]
     key = order_key(f.order)

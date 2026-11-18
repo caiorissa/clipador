@@ -50,6 +50,8 @@ def enqueue(
     """Add a job (or return the already queued/running one for the same type+source).
     Higher `priority` is claimed first (default 0; review prefetch uses a negative value)."""
     stage = get_stage(job_type)
+    if needs_gpu is None:
+        needs_gpu = stage.needs_gpu
     existing = (
         None
         if not dedupe
@@ -67,7 +69,7 @@ def enqueue(
         type=job_type,
         source_id=source_id,
         payload=payload or {},
-        needs_gpu=stage.needs_gpu if needs_gpu is None else needs_gpu,
+        needs_gpu=needs_gpu,
         max_attempts=stage.max_attempts,
         priority=priority,
         log=_stamp("Job criado e na fila."),
@@ -75,6 +77,24 @@ def enqueue(
     session.add(job)
     session.flush()
     return job
+
+
+def release_cloud_ai_from_gpu(engine: Engine) -> int:
+    """With Claude as the AI judge the 'enrich' step runs in the cloud: queued enrich jobs
+    don't need the GPU lock (they go in parallel with Whisper). Returns how many changed."""
+    with Session(engine) as s:
+        rows = s.exec(
+            select(Job).where(
+                Job.type == "enrich",
+                Job.status == JobStatus.QUEUED,
+                Job.needs_gpu == True,  # noqa: E712
+            )
+        ).all()
+        for j in rows:
+            j.needs_gpu = False
+            s.add(j)
+        s.commit()
+        return len(rows)
 
 
 def enqueue_next_in_chain(engine: Engine, job_id: int) -> Job | None:
