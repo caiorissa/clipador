@@ -29,7 +29,8 @@ from clipador.worker import queue
 router = APIRouter()
 SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
-_PENDING_AUTH: dict[str, tuple[str, str, str]] = {}  # state -> (platform, verifier, redirect)
+# state -> (platform, verifier, redirect uri, Google project client id or "")
+_PENDING_AUTH: dict[str, tuple[str, str, str, str]] = {}
 QUEUE_STATUSES = (
     PublicationStatus.HELD,
     PublicationStatus.SCHEDULED,
@@ -44,6 +45,19 @@ def _setup_error(fn, settings) -> str | None:
         return None
     except ClipadorError as e:
         return e.message
+
+
+def _projects(session: Session, settings: Settings, accs: list[SocialAccount]) -> list[dict]:
+    """Google Cloud projects: which channels use each one and today's upload quota."""
+    try:
+        clients = youtube.load_clients(settings)
+    except ClipadorError:
+        return []
+    now = utcnow()
+    return [{"client": c, "label": c.name or c.client_id[:12],
+             "accounts": [a for a in accs if a.project_id == c.client_id and a.active],
+             "used": accounts.project_uploads_today(session, c.client_id, now),
+             "cap": settings.youtube_uploads_per_project_day} for c in clients]  # fmt: skip
 
 
 def _ctx(session: Session, settings: Settings, cand_id: int | None) -> dict:
@@ -93,6 +107,7 @@ def _ctx(session: Session, settings: Settings, cand_id: int | None) -> dict:
         "form": form,
         "totals": totals,
         "yt_error": _setup_error(youtube.load_client, settings),
+        "projects": _projects(session, settings, accs),
         "tt_error": _setup_error(tiktok.load_client, settings),
         "privacy_labels": youtube.PRIVACY_LABELS,
         "platform_labels": accounts.PLATFORM_LABELS,
@@ -134,18 +149,22 @@ def publish_page(
 
 
 @router.get("/publicar/{platform}/conectar")
-def connect(request: Request, platform: str, settings: SettingsDep):
+def connect(request: Request, platform: str, settings: SettingsDep, projeto: str = ""):
     mod = {"youtube": youtube, "tiktok": tiktok}.get(platform)
     if mod is None:
         return redirect("/publicar", "Plataforma desconhecida.")
     try:
-        client = mod.load_client(settings)
+        if platform == "youtube":
+            client = youtube.load_client(settings, projeto or None)
+            projeto = client.client_id
+        else:
+            client = tiktok.load_client(settings)
     except ClipadorError as e:
         return redirect("/publicar", e.message)
     verifier, challenge = mod.new_pkce()
     state = secrets.token_urlsafe(24)
     redirect_uri = str(request.url_for("oauth_callback", platform=platform))
-    _PENDING_AUTH[state] = (platform, verifier, redirect_uri)
+    _PENDING_AUTH[state] = (platform, verifier, redirect_uri, projeto)
     return RedirectResponse(mod.auth_url(client, redirect_uri, state, challenge), 303)
 
 
@@ -162,13 +181,15 @@ def oauth_callback(
     if error or pending is None or not code or pending[0] != platform:
         why = f" ({error})" if error else ""
         return redirect("/publicar", f"Conexão cancelada{why}.")
-    _p, verifier, redirect_uri = pending
+    _p, verifier, redirect_uri, project = pending
     try:
         if platform == "tiktok":
             tok = tiktok.exchange_code(settings, code, redirect_uri, verifier)
             who = tok.pop("user")
         else:
-            tok = youtube.exchange_code(settings, code, redirect_uri, verifier)
+            tok = youtube.exchange_code(
+                settings, code, redirect_uri, verifier, client_id=project or None
+            )
             who = tok.pop("channel")
         acc = accounts.upsert_account(session, platform, who["id"], who["title"], tok)
         session.commit()
@@ -205,7 +226,14 @@ async def save_account(request: Request, acc_id: int, session: SessionDep, setti
         acc.post_now = form.get("post_now") == "on"
         acc.hold_on_alerts = form.get("hold_on_alerts") == "on"
         acc.slots = accounts.parse_slots(str(form.get("slots", "")))
-        acc.max_per_day = max(1, min(50, int(form.get("max_per_day") or 3)))
+        cap = accounts.TIKTOK_MAX_PER_DAY if acc.platform == "tiktok" else 50
+        acc.max_per_day = max(1, min(cap, int(form.get("max_per_day") or 3)))
+        acc.delay_minutes = max(
+            0,
+            min(
+                7 * 24 * 60, round(float(str(form.get("delay_hours") or 0).replace(",", ".")) * 60)
+            ),
+        )
         acc.min_gap_minutes = max(0, min(1440, int(form.get("min_gap_minutes") or 0)))
         privacy = str(form.get("privacy", acc.privacy))
         if privacy not in youtube.PRIVACY:

@@ -334,6 +334,25 @@ mão. A **fila** mostra o que está agendado, segurado e sendo enviado, com **Po
   dia por projeto do Google (todas as contas conectadas com o mesmo JSON dividem essa cota).
 - **TikTok:** a API não agenda, então o envio acontece no horário (PC e worker ligados).
 
+### Perfil geral + perfis por streamer
+
+- **Perfil geral:** uma conta **sem streamer marcado** pega os clips aprovados de **todos** e
+  **intercala** os streamers (o melhor de cada um por vez), em vez de postar só quem teve o melhor
+  dia. Suba o "máximo por dia" e ponha mais horários.
+- **Perfil de um streamer:** marque só ele.
+- **Mesmo clip nos dois:** o segundo canal recebe **outro título** dos que a IA sugeriu, e você pode
+  pôr **"Esperar após aprovar"** (ex.: 6 h no perfil geral) para eles não postarem juntos.
+
+**Cota do YouTube:** cada **projeto do Google Cloud** envia ~6 vídeos por dia, **somando todos
+os canais** conectados com ele (`CLIPADOR_YOUTUBE_UPLOADS_PER_PROJECT_DAY`). Para mais
+canais/posts, crie mais projetos (mesmo passo a passo, cada um com a YouTube Data API v3 ativada
+e você como usuário de teste) e coloque **um JSON por projeto** em `data/google_clients/`. A tela
+Publicar mostra os envios de hoje por projeto e tem "Conectar canal neste projeto". O agendador
+não marca num dia mais envios do que a cota do projeto e, se ela acabar, segura o envio até
+a meia-noite do Pacífico (quando o Google renova a cota).
+
+**TikTok:** até 15 posts por dia por conta.
+
 ### Configurar o TikTok (uma vez, grátis)
 
 1. <https://developers.tiktok.com> → **Manage apps** → crie um app.

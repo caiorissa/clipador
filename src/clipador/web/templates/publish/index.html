@@ -15,8 +15,22 @@
   (o worker precisa estar rodando). Alertas fortes da IA ou música no trecho seguram o clip para você liberar.</p>
 
 <h2>Contas</h2>
+{% if projects %}
+<div class="card small">
+  <strong>Projetos do Google (cota do YouTube)</strong> · cada projeto envia ~{{ projects[0].cap }} vídeos por dia, somando todos os canais dele. Para postar mais, crie outro projeto e coloque o JSON em <code>data/google_clients/</code>.
+  <div class="table-wrap"><table class="jobs">
+    <thead><tr><th>Projeto</th><th>Canais</th><th>Envios hoje</th><th></th></tr></thead>
+    <tbody>{% for p in projects %}
+      <tr><td>{{ p.label }}</td>
+        <td>{{ p.accounts|map(attribute='name')|join(', ') or '—' }}</td>
+        <td><span class="{{ 'error-text' if p.used >= p.cap else '' }}">{{ p.used }} / {{ p.cap }}</span></td>
+        <td class="actions"><a class="btn small primary" href="/publicar/youtube/conectar?projeto={{ p.client.client_id }}">+ Conectar canal neste projeto</a></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
 <div class="cand-actions" style="margin-bottom: .75rem">
-  <a class="btn {{ '' if yt_error else 'primary' }}" href="/publicar/youtube/conectar">+ Conectar canal do YouTube</a>
+  {% if not projects %}<a class="btn" href="/publicar/youtube/conectar">+ Conectar canal do YouTube</a>{% endif %}
   <a class="btn {{ '' if tt_error else 'primary' }}" href="/publicar/tiktok/conectar">+ Conectar TikTok</a>
 </div>
 {% if yt_error %}<p class="small warn-text">YouTube: {{ yt_error }}</p>{% endif %}
@@ -32,7 +46,9 @@
     {% elif a.paused %}<span class="badge warn">pausada</span>
     {% elif a.autopost %}<span class="badge ok">postagem automática</span>
     {% else %}<span class="badge muted">só manual</span>{% endif %}
-    <span class="small muted">· {{ totals.get(a.id, 0) }} views
+    <span class="small muted">· {% if a.streamer_ids %}{% for sid in a.streamer_ids %}{{ streamer_names.get(sid, '#' ~ sid) }}{{ ', ' if not loop.last }}{% endfor %}{% else %}todos os streamers{% endif %}
+      {% if a.delay_minutes %}· espera {{ (a.delay_minutes / 60)|round(1) }} h{% endif %}
+      · {{ totals.get(a.id, 0) }} views
       {% if a.autopost %}· {{ 'assim que aprovar' if a.post_now else a.slots|join(', ') }} · até {{ a.max_per_day }}/dia{% endif %}</span>
   </summary>
   {% if a.active %}
@@ -48,6 +64,9 @@
       <label>Intervalo mínimo (min)
         <input name="min_gap_minutes" type="number" min="0" max="1440" value="{{ a.min_gap_minutes }}">
       </label>
+      <label title="Ex.: no perfil geral, 6 h depois do perfil do streamer">Esperar após aprovar (h)
+        <input name="delay_hours" type="number" min="0" max="168" step="0.5" value="{{ (a.delay_minutes / 60)|round(1) }}">
+      </label>
       <label>Visibilidade
         <select name="privacy">{% for k, v in privacy_labels.items() %}<option value="{{ k }}" {{ 'selected' if a.privacy == k }}>{{ v }}</option>{% endfor %}</select>
       </label>
@@ -55,11 +74,11 @@
     <label class="check small"><input type="checkbox" name="post_now" {{ 'checked' if a.post_now }}> Postar assim que aprovar (ignora os horários; respeita o máximo por dia e o intervalo)</label>
     <label class="check small"><input type="checkbox" name="hold_on_alerts" {{ 'checked' if a.hold_on_alerts }}> Segurar clips com alerta forte da IA ou música (eu libero à mão)</label>
     <label class="check small"><input type="checkbox" name="paused" {{ 'checked' if a.paused }}> Pausada</label>
-    <div class="small muted" style="margin: .5rem 0 .25rem">Streamers desta conta (nenhum marcado = todos):</div>
+    <div class="small muted" style="margin: .5rem 0 .25rem">Streamers desta conta (nenhum marcado = <strong>todos</strong>: perfil geral, que intercala os streamers):</div>
     <div class="cand-actions">
       {% for s in streamers %}<label class="check small"><input type="checkbox" name="streamer_ids" value="{{ s.id }}" {{ 'checked' if s.id in a.streamer_ids }}> {{ s.display_name }}</label>{% endfor %}
     </div>
-    {% if a.platform == 'tiktok' %}<p class="small muted">TikTok: até o app ser aprovado pelo TikTok, os posts saem como privados.</p>{% endif %}
+    {% if a.platform == 'tiktok' %}<p class="small muted">TikTok: até 15 posts por dia por conta. Até o app ser aprovado pelo TikTok, os posts saem como privados.</p>{% endif %}
     {% if a.platform == 'youtube' %}<p class="small muted">YouTube: o vídeo é enviado até {{ 12 }} h antes do horário, privado, e fica público sozinho na hora (mesmo com o PC desligado). Cota grátis: ~6 envios por dia por projeto do Google.</p>{% endif %}
     <div class="form-actions"><button class="btn primary">Salvar</button></div>
   </form>

@@ -14,7 +14,7 @@ posting in its API: it is uploaded at the slot (the worker must be running).
 from __future__ import annotations
 
 import contextlib
-from datetime import UTC, date, datetime, timedelta, tzinfo
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
 from sqlalchemy import Engine
@@ -44,6 +44,19 @@ SEVERE_ALERTS = {
     "dados_pessoais_ou_doxxing",
 }
 MUSIC_HOLD_PCT = 60.0
+TIKTOK_MAX_PER_DAY = 15  # Content Posting API limit per creator account (approx.)
+
+
+def quota_tz() -> tzinfo:
+    """YouTube API quotas reset at midnight Pacific time."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo("America/Los_Angeles")
+    except Exception:  # Windows without tzdata: close enough (off by 1 h in summer)
+        return timezone(timedelta(hours=-8))
+
+
 ACTIVE_PUB = (
     PublicationStatus.SCHEDULED,
     PublicationStatus.QUEUED,
@@ -171,10 +184,24 @@ def next_slot(
     taken: list[datetime],
     tz: tzinfo | None = None,
     horizon_days: int = 60,
+    group_taken: list[datetime] | None = None,
+    group_cap: int | None = None,
+    group_tz: tzinfo | None = None,
 ) -> datetime:
     """Earliest time (UTC) >= now that respects the account's grid, daily cap and min gap,
-    given the times already `taken` by its other posts."""
+    given the times already `taken` by its other posts. `group_*`: a second daily cap shared
+    with other accounts (the YouTube upload quota of a Google Cloud project, whose day is
+    Pacific time)."""
     tz = tz or _local_tz()
+    gtz = group_tz or quota_tz()
+    gtaken = sorted(aware(t) for t in (group_taken or []))
+
+    def group_full(t: datetime) -> bool:
+        if not group_cap:
+            return False
+        d = t.astimezone(gtz).date()
+        return sum(1 for x in gtaken if x.astimezone(gtz).date() == d) >= group_cap
+
     gap = timedelta(minutes=max(0, acc.min_gap_minutes))
     cap = max(1, acc.max_per_day)
     taken = sorted(aware(t) for t in taken)
@@ -194,6 +221,10 @@ def next_slot(
                 nxt = datetime.combine(d + timedelta(days=1), datetime.min.time(), tz)
                 t = nxt.astimezone(UTC)
                 continue
+            if group_full(t):  # project quota of that day used: next quota day
+                gd = t.astimezone(gtz).date() + timedelta(days=1)
+                t = datetime.combine(gd, datetime.min.time(), gtz).astimezone(UTC)
+                continue
             clash = [x for x in taken if abs(t - x) < gap]
             if not clash:
                 return t
@@ -207,7 +238,7 @@ def next_slot(
         for hhmm in acc.slots:
             h, m = (int(x) for x in hhmm.split(":"))
             t = datetime(d.year, d.month, d.day, h, m, tzinfo=tz).astimezone(UTC)
-            if t >= now and free(t):
+            if t >= now and free(t) and not group_full(t):
                 return t
     raise ValidationError("A grade de horários desta conta está cheia pelos próximos 60 dias.")
 
@@ -253,7 +284,7 @@ def new_publication(
         title_ = (title or text)[:100]
         desc, tags = text, []
     else:
-        title_ = (title or (d.title if d else "") or "").strip()[:100]
+        title_ = (title or _title_variant(session, c, d) or "").strip()[:100]
         desc, tags = (d.description if d else ""), (list(d.hashtags) if d else [])
     return Publication(
         candidate_id=c.id,
@@ -268,6 +299,29 @@ def new_publication(
     )
 
 
+def _title_variant(session: Session, c: Candidate, d: PostDraft | None) -> str:
+    """The same clip on a second/third channel gets another of the AI's titles, so the
+    channels don't look like copies of each other."""
+    base = d.title if d else ""
+    others = session.exec(
+        select(Publication).where(
+            Publication.candidate_id == c.id,
+            Publication.platform == "youtube",
+            Publication.status != PublicationStatus.CANCELED,
+        )
+    ).all()
+    if not others:
+        return base
+    e = session.exec(
+        select(CandidateEnrichment).where(CandidateEnrichment.candidate_id == c.id)
+    ).first()
+    used = {p.title for p in others}
+    for t in e.titulos if e and e.titulos else []:
+        if t and t not in used and t != base:
+            return t
+    return base
+
+
 def taken_times(session: Session, acc_id: int) -> list[datetime]:
     pubs = session.exec(
         select(Publication).where(
@@ -277,8 +331,30 @@ def taken_times(session: Session, acc_id: int) -> list[datetime]:
     return [aware(p.scheduled_for or p.created_at) for p in pubs]
 
 
-def _candidates_for(session: Session, acc: SocialAccount) -> list[Candidate]:
+def _round_robin(cands: list[Candidate], streamer_of: dict[int, int]) -> list[Candidate]:
+    """Best first, but alternating streamers: a general profile mixes everyone instead of
+    posting 5 clips of whoever had the best day."""
+    by: dict[int, list[Candidate]] = {}
+    for c in cands:  # already sorted by score
+        by.setdefault(streamer_of.get(c.source_id, 0), []).append(c)
+    queues = sorted(by.values(), key=lambda q: -_score(q[0]))
+    out: list[Candidate] = []
+    while any(queues):
+        for q in queues:
+            if q:
+                out.append(q.pop(0))
+    return out
+
+
+def _score(c: Candidate) -> float:
+    return c.final_score if c.final_score is not None else c.score
+
+
+def _candidates_for(
+    session: Session, acc: SocialAccount, now: datetime | None = None
+) -> list[Candidate]:
     since = aware(acc.autopost_since)
+    ready_before = (aware(now) or utcnow()) - timedelta(minutes=max(0, acc.delay_minutes))
     q = (
         select(Candidate)
         .join(Source, Source.id == Candidate.source_id)
@@ -295,8 +371,58 @@ def _candidates_for(session: Session, acc: SocialAccount) -> list[Candidate]:
         reviewed = aware(c.reviewed_at or c.updated_at)
         if c.id in done or (since and reviewed and reviewed < since):
             continue
+        if reviewed and reviewed > ready_before:  # the account's delay hasn't passed yet
+            continue
         out.append(c)
-    return sorted(out, key=lambda c: -(c.final_score if c.final_score is not None else c.score))
+    out.sort(key=lambda c: -_score(c))
+    streamer_of = (
+        dict(
+            session.exec(
+                select(Source.id, Source.streamer_id).where(
+                    col(Source.id).in_({c.source_id for c in out})
+                )
+            ).all()
+        )
+        if out
+        else {}
+    )
+    return _round_robin(out, streamer_of)
+
+
+def project_times(session: Session, project_id: str | None) -> list[datetime]:
+    """Slots of every YouTube post (any account) on the same Google Cloud project."""
+    if not project_id:
+        return []
+    accs = [a.id for a in accounts(session) if a.project_id == project_id]
+    pubs = session.exec(
+        select(Publication).where(
+            col(Publication.account_id).in_(accs), col(Publication.status).in_(list(ACTIVE_PUB))
+        )
+    ).all()
+    return [aware(p.scheduled_for or p.created_at) for p in pubs]
+
+
+def project_uploads_today(session: Session, project_id: str | None, now: datetime) -> int:
+    """Uploads already made (or on their way) today, in the project's quota day."""
+    if not project_id:
+        return 0
+    qtz = quota_tz()
+    day = aware(now).astimezone(qtz).date()
+    accs = [a.id for a in accounts(session) if a.project_id == project_id]
+    pubs = session.exec(
+        select(Publication).where(
+            col(Publication.account_id).in_(accs),
+            col(Publication.status).in_(
+                [PublicationStatus.QUEUED, PublicationStatus.UPLOADING, PublicationStatus.PUBLISHED]
+            ),
+        )
+    ).all()
+    return sum(
+        1
+        for p in pubs
+        if p.status != PublicationStatus.PUBLISHED
+        or aware(p.updated_at).astimezone(qtz).date() == day
+    )
 
 
 def autopost_tick(
@@ -312,7 +438,8 @@ def autopost_tick(
         if not acc.autopost:
             continue
         taken = taken_times(session, acc.id)
-        for c in _candidates_for(session, acc):
+        proj_cap = settings.youtube_uploads_per_project_day if acc.project_id else None
+        for c in _candidates_for(session, acc, now):
             r = publishing.final_render(session, settings, c.id)
             if r is None:  # approve -> the final render is (or will be) on its way
                 if c.status == CandidateStatus.APPROVED:
@@ -327,7 +454,14 @@ def autopost_tick(
                 notes.append(f"{acc.name}: clip #{c.id} segurado ({reason}).")
             else:
                 pub.status = PublicationStatus.SCHEDULED
-                pub.scheduled_for = next_slot(now, acc, taken, tz)
+                pub.scheduled_for = next_slot(
+                    now,
+                    acc,
+                    taken,
+                    tz,
+                    group_taken=project_times(session, acc.project_id),
+                    group_cap=proj_cap,
+                )
                 taken.append(pub.scheduled_for)
                 notes.append(
                     f"{acc.name}: clip #{c.id} agendado para "
@@ -348,6 +482,12 @@ def autopost_tick(
         ahead = lead if p.platform == "youtube" else timedelta(0)
         if when - ahead > now:
             continue
+        if (
+            acc.project_id
+            and project_uploads_today(session, acc.project_id, now)
+            >= settings.youtube_uploads_per_project_day
+        ):
+            continue  # this project's quota is used up today: tries again after midnight PT
         c = session.get(Candidate, p.candidate_id)
         job = queue.enqueue(
             session,

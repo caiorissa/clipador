@@ -327,3 +327,103 @@ def test_account_settings_and_queue_pages(ysettings, engine, tmp_path):
     with Session(engine) as s:
         a = s.get(SocialAccount, acc)
     assert not a.active and a.credentials == {} and not a.autopost
+
+
+# --- several profiles (general + per streamer) ------------------------------------------------------
+
+
+def test_project_quota_is_shared_between_channels():
+    a = _acc(slots=["10:00", "12:00", "14:00", "16:00"], max_per_day=10, min_gap_minutes=0)
+    now = _at(18, 9)
+    pt = timezone(timedelta(hours=-8))
+    # the project already has 2 uploads that Pacific day (from another channel): cap 2 -> next day
+    other = [_at(18, 10, 30), _at(18, 11)]
+    t = accounts.next_slot(now, a, [], BRT, group_taken=other, group_cap=2, group_tz=pt)
+    assert t.astimezone(pt).date() > _at(18, 11).astimezone(pt).date()
+    assert accounts.next_slot(now, a, [], BRT, group_taken=other, group_cap=3,
+                              group_tz=pt) == _at(18, 10)  # fmt: skip
+
+
+def test_general_profile_alternates_streamers_and_waits_its_delay(ysettings, engine, tmp_path):
+    from datetime import date
+
+    from clipador.models import Source, Streamer
+
+    cid = _approved_with_final(ysettings, engine, tmp_path)
+    with Session(engine) as s:
+        base = s.get(Candidate, cid)
+        src = s.get(Source, base.source_id)
+        st2 = Streamer(
+            display_name="Outro", permission_confirmed=True, permission_date=date.today()
+        )
+        s.add(st2)
+        s.flush()
+        src2 = Source(streamer_id=st2.id, platform="twitch", kind="vod", external_id="2", url="u2",
+                      status="ready", file_path=src.file_path)  # fmt: skip
+        s.add(src2)
+        s.flush()
+        ids = {}
+        for name, source_id, scores in (("a", src.id, [99, 98, 97]), ("b", src2.id, [50])):
+            for i, sc in enumerate(scores):
+                c = Candidate(source_id=source_id, analysis_run_id=base.analysis_run_id, rank=i,
+                              start=100 + i * 40, end=130 + i * 40, peak_t=110 + i * 40, score=sc,
+                              status=CandidateStatus.APPROVED, reviewed_at=utcnow())  # fmt: skip
+                s.add(c)
+                s.flush()
+                ids[(name, i)] = c.id
+        base.status = CandidateStatus.SUGGESTED
+        s.add(base)
+        s.commit()
+        acc = s.get(SocialAccount, _account(engine, delay_minutes=0))
+        order = [c.id for c in accounts._candidates_for(s, acc)]
+    # best of A, then B (alternating), then the rest of A
+    assert order[:3] == [ids[("a", 0)], ids[("b", 0)], ids[("a", 1)]]
+    with Session(engine) as s:
+        acc.delay_minutes = 6 * 60
+        assert accounts._candidates_for(s, acc) == []  # approved just now: waits 6 h
+        later = accounts._candidates_for(s, acc, utcnow() + timedelta(hours=7))
+        assert len(later) == 4
+
+
+def test_same_clip_gets_another_title_on_a_second_channel(ysettings, engine, tmp_path):
+    from clipador.models import CandidateEnrichment
+
+    cid = _approved_with_final(ysettings, engine, tmp_path)
+    a1 = _account(engine, ext="UC1")
+    a2 = _account(engine, ext="UC2")
+    with Session(engine) as s:
+        src_id = s.get(Candidate, cid).source_id
+        s.add(CandidateEnrichment(candidate_id=cid, source_id=src_id, status="ok", prompt_version="v1", model="m", input_hash="h",
+                                  titulos=["Capotou o carro", "Que capotada!", "Olha isso"]))  # fmt: skip
+        s.commit()
+        c = s.get(Candidate, cid)
+        p1 = accounts.new_publication(s, s.get(SocialAccount, a1), c, 1, privacy="public")
+        s.add(p1)
+        s.flush()
+        p2 = accounts.new_publication(s, s.get(SocialAccount, a2), c, 1, privacy="public")
+    assert p1.title == "Capotou o carro" and p2.title == "Que capotada!"
+
+
+def test_tiktok_daily_cap_is_enforced_in_settings(ysettings, engine):
+    from clipador.web.app import create_app
+
+    acc = _account(engine, platform="tiktok", ext="tt9")
+    client = TestClient(create_app(ysettings))
+    client.post(f"/publicar/contas/{acc}", data={"autopost": "on", "slots": "12:00",
+                                                 "max_per_day": "40", "privacy": "public",
+                                                 "delay_hours": "1,5"})  # fmt: skip
+    with Session(engine) as s:
+        a = s.get(SocialAccount, acc)
+    assert a.max_per_day == accounts.TIKTOK_MAX_PER_DAY and a.delay_minutes == 90
+
+
+def test_several_google_projects(ysettings, tmp_path):
+    d = youtube.clients_dir(ysettings)
+    d.mkdir(parents=True)
+    (d / "projeto2.json").write_text(json.dumps({"installed": {"client_id": "cid2",
+                                                               "client_secret": "s2"}}))  # fmt: skip
+    clients = youtube.load_clients(ysettings)
+    assert [c.client_id for c in clients] == ["cid", "cid2"]
+    assert youtube.load_client(ysettings, "cid2").name == "projeto2"
+    with pytest.raises(youtube.YouTubeError, match="não está mais configurado"):
+        youtube.load_client(ysettings, "sumiu")

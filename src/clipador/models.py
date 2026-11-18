@@ -534,8 +534,16 @@ class SocialAccount(SQLModel, table=True):
     min_gap_minutes: int = 60
     privacy: str = "public"  # generic: private | unlisted | public
     hold_on_alerts: bool = True
+    # Wait this long after the approval before posting here (e.g. the general profile posts
+    # a few hours after the streamer's own profile, so they don't compete).
+    delay_minutes: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def project_id(self) -> str | None:
+        """YouTube: the Google Cloud project (client id) whose daily quota this account uses."""
+        return (self.credentials or {}).get("client_id") if self.platform == "youtube" else None
 
 
 class Publication(SQLModel, table=True):

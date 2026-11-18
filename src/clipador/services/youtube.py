@@ -48,8 +48,8 @@ class YouTubeError(ClipadorError):
 
 SETUP_HINT = (
     "Crie um cliente OAuth 'App para computador' no Google Cloud (com a YouTube Data API v3 "
-    "ativada), baixe o JSON e defina CLIPADOR_YOUTUBE_CLIENT_SECRETS no .env. Passo a passo no "
-    "README (Publicar no YouTube)."
+    "ativada), baixe o JSON e coloque-o em data/google_clients/ (ou defina "
+    "CLIPADOR_YOUTUBE_CLIENT_SECRETS no .env). Passo a passo no README (Publicar no YouTube)."
 )
 
 
@@ -60,18 +60,56 @@ SETUP_HINT = (
 class Client:
     client_id: str
     client_secret: str
+    name: str = ""  # file name: one Google Cloud project = one daily upload quota
 
 
-def load_client(settings: Settings) -> Client:
-    path = settings.youtube_client_secrets
-    if not path or not Path(path).is_file():
-        raise YouTubeError("YouTube não configurado. " + SETUP_HINT)
+def _read_client(path: Path) -> Client:
     try:
-        data = json.loads(Path(path).read_text("utf-8"))
+        data = json.loads(path.read_text("utf-8"))
         block = data.get("installed") or data.get("web") or data
-        return Client(block["client_id"], block["client_secret"])
-    except (ValueError, KeyError) as e:
-        raise YouTubeError("O arquivo de credenciais do YouTube não é válido. " + SETUP_HINT) from e
+        return Client(block["client_id"], block["client_secret"], path.stem)
+    except (ValueError, KeyError, OSError) as e:
+        raise YouTubeError(f"O arquivo de credenciais '{path.name}' não é válido. "
+                           + SETUP_HINT) from e  # fmt: skip
+
+
+def clients_dir(settings: Settings) -> Path:
+    """Drop one OAuth JSON per Google Cloud project here (each has its own ~6 uploads/day)."""
+    return settings.data_dir / "google_clients"
+
+
+def load_clients(settings: Settings) -> list[Client]:
+    """Every configured Google Cloud project: CLIPADOR_YOUTUBE_CLIENT_SECRETS (a file, or a
+    folder of JSONs) + data/google_clients/*.json. Same client id twice counts once."""
+    paths: list[Path] = []
+    cfg = settings.youtube_client_secrets
+    if cfg:
+        cfg = Path(cfg)
+        paths += sorted(cfg.glob("*.json")) if cfg.is_dir() else ([cfg] if cfg.is_file() else [])
+    if clients_dir(settings).is_dir():
+        paths += sorted(clients_dir(settings).glob("*.json"))
+    out: dict[str, Client] = {}
+    for p in paths:
+        c = _read_client(p)
+        out.setdefault(c.client_id, c)
+    return list(out.values())
+
+
+def load_client(settings: Settings, client_id: str | None = None) -> Client:
+    """The project with `client_id` (the one an account was connected with), or the first."""
+    clients = load_clients(settings)
+    if not clients:
+        raise YouTubeError("YouTube não configurado. " + SETUP_HINT)
+    if client_id:
+        for c in clients:
+            if c.client_id == client_id:
+                return c
+        raise YouTubeError(
+            "O projeto do Google com que esta conta foi conectada não está mais configurado "
+            "(o JSON sumiu de data/google_clients ou do .env). Recoloque o arquivo ou conecte "
+            "a conta de novo."
+        )
+    return clients[0]
 
 
 class TokenStore(Protocol):
@@ -153,9 +191,11 @@ def _token_request(data: dict[str, str], http: httpx.Client) -> dict[str, Any]:
 
 
 def exchange_code(settings: Settings, code: str, redirect_uri: str, verifier: str,
-                  http: httpx.Client | None = None) -> dict[str, Any]:  # fmt: skip
-    """Code -> token (with refresh token) + {"channel": {id, title}}. The caller stores it."""
-    client = load_client(settings)
+                  http: httpx.Client | None = None,
+                  client_id: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """Code -> token (with refresh token, and the project's client_id) + {"channel": {id,
+    title}}. The caller stores it."""
+    client = load_client(settings, client_id)
     with http or httpx.Client() as h:
         form = {"code": code, "client_id": client.client_id,
                 "client_secret": client.client_secret, "redirect_uri": redirect_uri,
@@ -163,6 +203,7 @@ def exchange_code(settings: Settings, code: str, redirect_uri: str, verifier: st
         tok = _token_request(form, h)
         if not tok.get("refresh_token"):
             raise YouTubeError("O Google não devolveu um refresh token; tente conectar de novo.")
+        tok["client_id"] = client.client_id
         store = MemoryStore(tok)
         tok["channel"] = YouTube(settings, h, store).channel()
     return store.token
@@ -184,7 +225,7 @@ class YouTube:
             raise YouTubeError("Esta conta do YouTube perdeu a autorização: conecte de novo.")
         if tok.get("access_token") and tok.get("expires_at", 0) > time.time():
             return tok["access_token"]
-        client = load_client(self.settings)
+        client = load_client(self.settings, tok.get("client_id"))
         fresh = _token_request({"client_id": client.client_id,
                                 "client_secret": client.client_secret,
                                 "refresh_token": tok["refresh_token"],

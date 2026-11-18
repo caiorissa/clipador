@@ -159,6 +159,10 @@ class Settings(BaseSettings):
     # the slot via publishAt), so they go public on time even with the PC off.
     youtube_upload_lead_hours: float = 12.0
     autopost_tick_seconds: float = 60.0
+    # videos.insert costs 1600 of the 10 000 daily units of a Google Cloud project: ~6 uploads
+    # per project per day, shared by every channel connected with it. More channels/posts =
+    # more projects (one JSON each in data/google_clients/).
+    youtube_uploads_per_project_day: int = 6
     # TikTok app (developers.tiktok.com: Login Kit + Content Posting API).
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""

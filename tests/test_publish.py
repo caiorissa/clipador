@@ -295,8 +295,8 @@ def test_publish_pages(ysettings, engine, tmp_path, google):
 
     client = TestClient(create_app(ysettings))
     r = client.get("/publicar")
-    assert r.status_code == 200 and "Conectar canal do YouTube" in r.text
-    r = client.get("/publicar/youtube/conectar", follow_redirects=False)
+    assert r.status_code == 200 and "Conectar canal neste projeto" in r.text
+    r = client.get("/publicar/youtube/conectar?projeto=cid", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith(youtube.AUTH_URL)
     state = dict(x.split("=", 1) for x in r.headers["location"].split("?")[1].split("&"))["state"]
     r = client.get(f"/publicar/youtube/callback?state={state}&code=abc", follow_redirects=False)
