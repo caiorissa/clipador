@@ -27,6 +27,14 @@ def _count(session: Session, q) -> int:
     return int(session.exec(q).one() or 0)
 
 
+def _approved_todo(session: Session, settings) -> int:
+    """Approved clips still to render or to post."""
+    from clipador.services import approved
+
+    c = approved.counts(session, settings)
+    return c["sem_render"] + c["prontos"]
+
+
 def nav_counts(engine: Engine, settings=None) -> dict[str, int]:
     """Small badges in the sidebar (+ "worker": 1/0). Never raises (the menu must render)."""
     try:
@@ -53,6 +61,7 @@ def nav_counts(engine: Engine, settings=None) -> dict[str, int]:
                 "jobs_queued": _count(s, select(func.count()).select_from(Job).where(
                     Job.status == JobStatus.QUEUED)),
                 "worker": int(worker_alive(settings)) if settings is not None else 1,
+                "approved_todo": _approved_todo(s, settings) if settings is not None else 0,
             }  # fmt: skip
     except Exception:
         return {}

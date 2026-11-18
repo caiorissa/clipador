@@ -1,0 +1,73 @@
+{% if it %}{% set c = it.c %}
+<article class="ap-card state-{{ it.state }}" id="ap-{{ c.id }}"
+  {% if it.state == 'renderizando' %}hx-get="/aprovados/{{ c.id }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <div class="ap-media">
+    {% if it.final %}
+      <video controls preload="metadata" playsinline src="/arquivos/{{ it.final.path }}"{% if it.final.thumbnail_path %} poster="/arquivos/{{ it.final.thumbnail_path }}"{% endif %}></video>
+    {% else %}
+      <div class="ap-placeholder">
+        {% if it.state == 'renderizando' %}
+          <div class="spinner"></div>
+          <span>Renderizando… {{ (it.progress or 0)|round|int }}%</span>
+          <div class="progress" style="width:70%"><div class="bar" style="width: {{ it.progress or 0 }}%"></div></div>
+        {% else %}
+          <span class="muted small">Sem o corte final ainda</span>
+          <button class="btn primary" hx-post="/aprovados/{{ c.id }}/renderizar" hx-target="#ap-{{ c.id }}" hx-swap="outerHTML">🎬 Renderizar</button>
+          {% if it.failed %}<span class="small error-text">O último render falhou: {{ (it.failed.error or '')[:120] }}</span>{% endif %}
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+  <div class="ap-body">
+    <div class="ap-head">
+      <span class="score" title="nota final">{{ ((c.final_score if c.final_score is not none else c.score))|round|int }}</span>
+      {% if c.live_session_id %}<span class="badge live">AO VIVO</span>{% endif %}
+      <span class="badge {{ {'sem_render': 'muted', 'renderizando': '', 'prontos': 'ok', 'postados': 'ok'}[it.state] }}">{{ {'sem_render': 'falta renderizar', 'renderizando': 'renderizando', 'prontos': 'pronto para postar', 'postados': 'postado'}[it.state] }}</span>
+    </div>
+    <h3 class="ap-title">{{ it.title }}</h3>
+    <div class="small muted">{{ it.streamer.display_name if it.streamer }}{% if it.source %} · <a href="/fontes/{{ it.source.id }}#cand-{{ c.id }}">{{ (it.source.title or 'fonte')[:50] }}</a>{% endif %} · {{ (c.eff_end - c.eff_start)|round|int }} s</div>
+
+    {% if it.pubs %}
+    <ul class="ap-pubs">
+      {% for p in it.pubs if p.status != 'canceled' %}
+      <li><span class="badge platform-{{ p.platform }}">{{ 'TikTok' if p.platform == 'tiktok' else 'YouTube' }}</span>
+        {% if p.status == 'published' %}<span class="ok-text">publicado</span>{% if p.url %} · <a href="{{ p.url }}" target="_blank" rel="noopener">abrir</a>{% endif %}{% if p.views is not none %} · {{ p.views }} views{% endif %}
+        {% elif p.status == 'scheduled' %}agendado {{ p.scheduled_for|dt }}
+        {% elif p.status == 'held' %}<span class="warn-text">segurado: {{ p.hold_reason }}</span>
+        {% elif p.status == 'failed' %}<span class="error-text">falhou</span>
+        {% else %}enviando…{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if error %}<div class="flash error small">{{ error }}</div>{% endif %}
+    {% if msg %}<div class="flash small">{{ msg }}</div>{% endif %}
+
+    {% if it.final and accounts %}
+    <form class="ap-post" hx-post="/aprovados/{{ c.id }}/postar" hx-target="#ap-{{ c.id }}" hx-swap="outerHTML">
+      <div class="ap-post-row">
+        <select name="account_id" aria-label="Conta">
+          {% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if it.streamer and it.streamer.id in a.streamer_ids }}>{{ a.label }}</option>{% endfor %}
+        </select>
+        <select name="when" aria-label="Quando" onchange="this.form.querySelector('.ap-date').hidden = this.value !== 'data'">
+          <option value="grade">Próximo horário</option>
+          <option value="agora">Agora</option>
+          <option value="data">Escolher data…</option>
+        </select>
+        <select name="privacy" aria-label="Visibilidade">
+          {% for k, v in privacy_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == 'public' }}>{{ v }}</option>{% endfor %}
+        </select>
+      </div>
+      <input class="ap-date" type="datetime-local" name="publish_at" hidden>
+      <div class="ap-post-row">
+        <label class="check small"><input type="checkbox" name="confirm"> Conferi direitos, música e crédito</label>
+        <button class="btn primary">Postar</button>
+      </div>
+    </form>
+    {% elif it.final %}
+      <a class="btn small" href="/publicar">Conectar uma conta para postar</a>
+    {% endif %}
+    {% if it.final %}<div class="ap-links small"><a href="/arquivos/{{ it.final.path }}" download>⬇ Baixar vídeo</a>{% if it.final.package_path %} · <a href="/arquivos/{{ it.final.package_path }}" target="_blank">📝 Títulos e legendas</a>{% endif %}</div>{% endif %}
+  </div>
+</article>
+{% endif %}

@@ -11,6 +11,7 @@ from clipador.db import make_engine, run_migrations
 from clipador.web.deps import STATIC_DIR
 from clipador.web.routes import (
     analysis,
+    approved,
     home,
     jobs,
     live,
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sources,
         analysis,
         review,
+        approved,
         live,
         publish,
         jobs,

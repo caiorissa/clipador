@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Aprovados{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Aprovados</h1>
+    <p class="lead">Todos os clips que você aprovou: renderize o que falta e poste direto daqui — agora, no próximo horário da conta ou numa data.</p></div>
+  <div class="cand-actions" style="margin:0">
+    {% if counts.sem_render %}
+    <form method="post" action="/aprovados/renderizar-faltando"><button class="btn primary">🎬 Renderizar os {{ counts.sem_render }} que faltam</button></form>
+    {% endif %}
+    <a class="btn" href="/revisao">← Revisar mais</a>
+  </div>
+</div>
+
+<div class="tabs">
+  {% for key, label in filters.items() %}
+    <a class="tab {{ 'active' if filtro == key }}" href="?filtro={{ key }}{% if streamer_id %}&streamer={{ streamer_id }}{% endif %}">{{ label }} <span class="tab-count">{{ counts.get(key, 0) }}</span></a>
+  {% endfor %}
+  <form method="get" class="tab-filter">
+    <input type="hidden" name="filtro" value="{{ filtro }}">
+    <select name="streamer" onchange="this.form.submit()" aria-label="Streamer">
+      <option value="">Todos os streamers</option>
+      {% for s in streamers %}<option value="{{ s.id }}" {{ 'selected' if streamer_id == s.id }}>{{ s.display_name }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if not accounts %}
+  <div class="flash warn small">Nenhuma conta conectada para postar. <a href="/publicar">Conecte o YouTube ou o TikTok em Publicar</a>.</div>
+{% endif %}
+
+{% if items %}
+<div class="approved-grid">
+  {% for it in items %}{% include "approved/_item.html" %}{% endfor %}
+</div>
+{% else %}
+  <div class="empty">{% if filtro == 'todos' %}Nenhum clip aprovado ainda. Aprove os melhores momentos na <a href="/revisao">Revisão</a>.{% else %}Nada aqui com esse filtro.{% endif %}</div>
+{% endif %}
+{% endblock %}
