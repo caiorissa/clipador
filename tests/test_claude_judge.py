@@ -70,7 +70,7 @@ def test_isolated_call_and_structured_output(settings, fake_claude):
     assert isinstance(c, llm_client.ClaudeCodeClient)
     assert "claude:sonnet" in c.list_models()
     assert llm_client.default_model(s) == "claude:sonnet"
-    assert llm_client.prompt_name(s) == "enrich_v2"
+    assert llm_client.prompt_name(s) == "enrich_v3"
     r = c.chat("claude:opus", [{"role": "system", "content": "SISTEMA"},
                                {"role": "user", "content": "trecho <<<TRANSCRICAO_INICIO>>>"}],
                schema={"type": "object"}, temperature=0.2, num_ctx=0, keep_alive=0, timeout=30)  # fmt: skip
@@ -118,6 +118,7 @@ def test_enrich_stage_with_claude(asettings, engine, fake_tx, fake_claude):
 
     exe, calls = fake_claude
     asettings.target_clips = 1  # K = 3
+    asettings.ollama_url = "http://127.0.0.1:9"  # hermetic: a real local Ollama must not answer
     sid = _source(engine, asettings)
     _analyze(engine, sid)
     w = Worker(asettings, engine)
@@ -132,11 +133,9 @@ def test_enrich_stage_with_claude(asettings, engine, fake_tx, fake_claude):
     with Session(engine) as s:
         rows = s.exec(select(CandidateEnrichment)).all()
     assert rows and all(r.model == "claude:sonnet" and r.status == "ok" for r in rows)
-    assert all(r.prompt_version.startswith("enrich_v2") for r in rows)
+    assert all(r.prompt_version.startswith("enrich_v3") for r in rows)
     assert len(calls()) == len(rows)
-    assert (
-        "O que vale um corte" in calls()[0]["args"][calls()[0]["args"].index("--system-prompt") + 1]
-    )
+    assert "Vale corte" in calls()[0]["args"][calls()[0]["args"].index("--system-prompt") + 1]
 
 
 def test_subscription_limit_pauses_claude(settings, fake_claude, monkeypatch):

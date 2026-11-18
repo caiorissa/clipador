@@ -200,7 +200,7 @@ class EnrichStage(Stage):
                     words=words, start=c.eff_start, end=c.eff_end, peak=c.peak_t, chat=chat,
                     chat_delay=chat_delay, streamer=streamer.display_name, game=game,
                     platform=source.platform, detection_score=c.score, breakdown=c.breakdown,
-                    instruction=instr,
+                    instruction=instr, compact=settings.llm_backend == "claude",
                 )  # fmt: skip
                 h = input_hash(cctx, model, prompt.version)
                 if (

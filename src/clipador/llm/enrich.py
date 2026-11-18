@@ -30,6 +30,8 @@ MAX_CHAT_SAMPLES = 8
 MAX_CHAT_LEN = 80
 MAX_TRANSCRIPT_CHARS = 4000
 MAX_INSTRUCTION = 200
+COMPACT_CONTEXT_CHARS = 240  # ~one sentence before/after the clip
+COMPACT_CLIP_CHARS = 2400  # a 60 s clip is ~1000 chars; long monologues are cut
 
 _DELIM_RE = re.compile(r"<{2,}|>{2,}|\[\[|\]\]")
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -113,7 +115,11 @@ def build_context(
     detection_score: float,
     breakdown: dict[str, float | None],
     instruction: str = "",
+    compact: bool = False,
 ) -> ClipContext:
+    """`compact` (Claude: tokens count against the subscription): one sentence of context on
+    each side instead of 20 s, fewer chat lines."""
+
     def text(a: float, b: float) -> str:
         return " ".join(w[2] for w in words if a <= w[0] < b)
 
@@ -121,15 +127,17 @@ def build_context(
     clip = text(start, end)
     after = text(end, end + CONTEXT_SECONDS)
     summary = summarize_chat(chat, start, end + chat_delay + 5) if chat else None
+    if summary and compact:
+        summary.samples = summary.samples[:4]
     return ClipContext(
         streamer=streamer,
         game=game,
         platform=platform,
         start=start,
         end=end,
-        before=sanitize_untrusted(before)[-1000:],
-        clip=sanitize_untrusted(clip)[:MAX_TRANSCRIPT_CHARS],
-        after=sanitize_untrusted(after)[:1000],
+        before=sanitize_untrusted(before)[-(COMPACT_CONTEXT_CHARS if compact else 1000) :],
+        clip=sanitize_untrusted(clip)[: COMPACT_CLIP_CHARS if compact else MAX_TRANSCRIPT_CHARS],
+        after=sanitize_untrusted(after)[: COMPACT_CONTEXT_CHARS if compact else 1000],
         detection_score=round(detection_score, 1),
         breakdown=breakdown,
         chat=summary,

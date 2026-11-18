@@ -167,6 +167,18 @@ def apply_auto_clip(s, settings, ls: LiveSession) -> list[Candidate]:
     return hits
 
 
+LIVE_AI_PER_SEGMENT = 3  # Claude: only the most promising clips of each segment (saves tokens)
+
+
+def _ai_batch(s, settings, live_id: int, touched: list[Candidate]) -> list[int]:
+    """Which clips go to the AI after a segment. With Claude (tokens count against the
+    subscription) only the best few by detection score, plus a few never-scored leftovers."""
+    if settings.llm_backend != "claude":
+        return [c.id for c in touched] + _unscored(s, live_id, {c.id for c in touched})
+    best = sorted(touched, key=lambda c: -c.score)[:LIVE_AI_PER_SEGMENT]
+    return [c.id for c in best] + _unscored(s, live_id, {c.id for c in touched}, limit=2)
+
+
 def _unscored(s, live_id: int, skip: set[int], limit: int = 20) -> list[int]:
     """Clips of the session the AI hasn't scored yet (e.g. the subscription limit was hit):
     retried with the next segment, best detection score first."""
@@ -303,7 +315,7 @@ class LiveAnalyzeStage(Stage):
                 s.add(run)
             from clipador.worker import queue
 
-            to_score = [c.id for c in touched] + _unscored(s, ls.id, {c.id for c in touched})
+            to_score = _ai_batch(s, settings, ls.id, touched)
             llm = bool(to_score) and _llm_up(settings)
             if llm:  # the AI scores them; auto-clip runs at the end of that job
                 queue.enqueue(s, "enrich", ls.source_id,

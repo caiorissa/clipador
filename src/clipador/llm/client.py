@@ -338,7 +338,7 @@ def prompt_name(settings: Settings) -> str:
     """The enrich prompt to use (CLIPADOR_ENRICH_PROMPT, or by backend when 'auto')."""
     if settings.enrich_prompt != "auto":
         return settings.enrich_prompt
-    return "enrich_v2" if settings.llm_backend == "claude" else "enrich_v1"
+    return "enrich_v3" if settings.llm_backend == "claude" else "enrich_v1"
 
 
 def make_llm_client(settings: Settings) -> LLMClient:
