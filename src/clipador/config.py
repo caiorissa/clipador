@@ -166,6 +166,9 @@ class Settings(BaseSettings):
     # TikTok app (developers.tiktok.com: Login Kit + Content Posting API).
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""
+    # TikTok only accepts https redirect URIs: an https page that forwards to this app's
+    # /publicar/tiktok/callback (e.g. a GitHub Pages relay). Empty = this app's own URL.
+    tiktok_redirect_uri: str = ""
 
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala

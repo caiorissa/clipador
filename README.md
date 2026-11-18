@@ -358,8 +358,10 @@ a meia-noite do Pacífico (quando o Google renova a cota).
 1. <https://developers.tiktok.com> → **Manage apps** → crie um app.
 2. Adicione os produtos **Login Kit** e **Content Posting API** (ative *Direct Post*).
 3. Escopos: `user.info.basic`, `video.publish`, `video.list`.
-4. Em **Redirect URI**, cadastre a URL que a tela Publicar mostra
-   (`http://127.0.0.1:8000/publicar/tiktok/callback` no padrão).
+4. Em **Redirect URI** o TikTok só aceita `https`: cadastre uma página `https` que repassa para
+   o Clipador local (ex.: GitHub Pages com `tiktok-callback.html`, que redireciona para
+   `http://localhost:8000/publicar/tiktok/callback` mantendo os parâmetros) e ponha a mesma URL
+   em `CLIPADOR_TIKTOK_REDIRECT_URI`. Abra o Clipador por `http://localhost:8000`.
 5. No `.env`: `CLIPADOR_TIKTOK_CLIENT_KEY=…` e `CLIPADOR_TIKTOK_CLIENT_SECRET=…`, reinicie a web
    e clique em **Conectar TikTok**.
 

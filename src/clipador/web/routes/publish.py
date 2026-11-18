@@ -133,9 +133,18 @@ def _page(
     **extra,
 ):
     ctx = _ctx(session, settings, cand_id)
-    ctx["tiktok_redirect"] = str(request.url_for("oauth_callback", platform="tiktok"))
+    ctx["tiktok_redirect"] = _redirect_uri(request, settings, "tiktok")
     ctx.update(extra)
     return render(request, "publish/index.html", status_code=status_code, **ctx)
+
+
+def _redirect_uri(request: Request, settings: Settings, platform: str) -> str:
+    """Where the platform sends the user back. TikTok requires https, so a relay page can be
+    configured (CLIPADOR_TIKTOK_REDIRECT_URI); it must be identical in the authorize and the
+    token requests (the pending state keeps it)."""
+    if platform == "tiktok" and settings.tiktok_redirect_uri.strip():
+        return settings.tiktok_redirect_uri.strip()
+    return str(request.url_for("oauth_callback", platform=platform))
 
 
 @router.get("/publicar")
@@ -163,7 +172,7 @@ def connect(request: Request, platform: str, settings: SettingsDep, projeto: str
         return redirect("/publicar", e.message)
     verifier, challenge = mod.new_pkce()
     state = secrets.token_urlsafe(24)
-    redirect_uri = str(request.url_for("oauth_callback", platform=platform))
+    redirect_uri = _redirect_uri(request, settings, platform)
     _PENDING_AUTH[state] = (platform, verifier, redirect_uri, projeto)
     return RedirectResponse(mod.auth_url(client, redirect_uri, state, challenge), 303)
 

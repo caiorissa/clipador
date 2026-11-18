@@ -427,3 +427,16 @@ def test_several_google_projects(ysettings, tmp_path):
     assert youtube.load_client(ysettings, "cid2").name == "projeto2"
     with pytest.raises(youtube.YouTubeError, match="não está mais configurado"):
         youtube.load_client(ysettings, "sumiu")
+
+
+def test_tiktok_uses_the_https_relay_redirect(ysettings, engine):
+    from clipador.web.app import create_app
+
+    ysettings.tiktok_client_key, ysettings.tiktok_client_secret = "ck", "cs"
+    ysettings.tiktok_redirect_uri = "https://exemplo.github.io/site/tiktok-callback.html"
+    client = TestClient(create_app(ysettings))
+    r = client.get("/publicar/tiktok/conectar", follow_redirects=False)
+    assert (
+        "redirect_uri=https%3A%2F%2Fexemplo.github.io%2Fsite%2Ftiktok-callback.html"
+        in (r.headers["location"])
+    )
