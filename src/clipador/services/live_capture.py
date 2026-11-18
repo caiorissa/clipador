@@ -52,13 +52,23 @@ CHAT_FILE = "chat.jsonl"
 
 
 def segment_args(
-    input_args: list[str], out_dir: Path, segment_seconds: int, start_number: int
+    input_args: list[str],
+    out_dir: Path,
+    segment_seconds: int,
+    start_number: int,
+    separate_audio: bool = False,
 ) -> list[str]:
     """ffmpeg arguments that copy the input into numbered MPEG-TS segments and append each
-    finished one to segments.csv (name,start,end). MPEG-TS survives an abrupt stop."""
+    finished one to segments.csv (name,start,end). MPEG-TS survives an abrupt stop.
+    `separate_audio`: input 0 is video-only and input 1 is audio-only (YouTube lives)."""
+    maps = (
+        ["-map", "0:v:0", "-map", "1:a:0"]
+        if separate_audio
+        else ["-map", "0:v:0?", "-map", "0:a:0?"]
+    )
     return [
         "-hide_banner", "-loglevel", "warning", "-y", *input_args,
-        "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy",
+        *maps, "-c", "copy",
         "-f", "segment", "-segment_time", str(segment_seconds), "-reset_timestamps", "1",
         "-segment_start_number", str(start_number),
         "-segment_list", str(out_dir / SEGMENT_LIST), "-segment_list_type", "csv",
@@ -67,15 +77,17 @@ def segment_args(
     ]  # fmt: skip
 
 
-def stream_input_args(url: str) -> list[str]:
-    """HLS from Twitch/Kick/YouTube: let ffmpeg ride over short network hiccups by itself
-    (the reconnect options only exist for http(s) inputs)."""
-    if not url.lower().startswith(("http://", "https://")):
-        return ["-i", url]
-    return [
-        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_on_network_error", "1",
-        "-reconnect_delay_max", "10", "-rw_timeout", "30000000", "-i", url,
-    ]  # fmt: skip
+def stream_input_args(url: str | list[str]) -> list[str]:
+    """HLS from Twitch/Kick/YouTube (one URL, or [video, audio]): let ffmpeg ride over short
+    network hiccups by itself (the reconnect options only exist for http(s) inputs)."""
+    out: list[str] = []
+    for u in [url] if isinstance(url, str) else url:
+        if u.lower().startswith(("http://", "https://")):
+            out += ["-reconnect", "1", "-reconnect_streamed", "1",
+                    "-reconnect_on_network_error", "1", "-reconnect_delay_max", "10",
+                    "-rw_timeout", "30000000"]  # fmt: skip
+        out += ["-i", u]
+    return out
 
 
 def sim_input_args(path: Path, speed: float | None) -> list[str]:
@@ -249,7 +261,7 @@ class Capture:
             ls = s.get(LiveSession, self.live_id)
             return ls is None or ls.stop_requested or not ls.active
 
-    def _resolve(self) -> str:
+    def _resolve(self) -> str | list[str]:
         if self._resolve_url:
             return self._resolve_url(self.url)
         from clipador.platforms.live import resolve_stream_url
@@ -290,12 +302,29 @@ class Capture:
             stdin = self.feeder.stdout
             cmd = [self.settings.ffmpeg_path, *out_args(["-i", "pipe:0"])]
         else:
-            cmd = [self.settings.ffmpeg_path, *out_args(stream_input_args(self._resolve()))]
+            urls = self._resolve()
+            urls = [urls] if isinstance(urls, str) else list(urls)
+            cmd = [self.settings.ffmpeg_path,
+                   *segment_args(stream_input_args(urls), self.dir, self.segment_seconds,
+                                 st.next_index, separate_audio=len(urls) > 1)]  # fmt: skip
         self.proc = self.popen(cmd, stdin=stdin, stdout=subprocess.DEVNULL,
                                stderr=subprocess.PIPE, text=False)  # fmt: skip
         st.run_base_global, st.run_base_wall = st.global_end, time.monotonic()
         st.seen_rows = 0  # ffmpeg rewrites segments.csv on every start
         self._set_recording_row()
+
+    def _disable_from_start(self) -> None:
+        self.from_start = False
+        note = "não deu para gravar desde o início; gravando a partir de agora"
+        self.log(f"AVISO: {note}.")
+        with Session(self.engine) as s:
+            ls = s.get(LiveSession, self.live_id)
+            if ls is not None:
+                ls.live_from_start = False
+                if note not in (ls.warning or ""):
+                    ls.warning = f"{ls.warning} · {note}" if ls.warning else note.capitalize()
+                s.add(ls)
+                s.commit()
 
     def _stop_ffmpeg(self, timeout: float = 15) -> None:
         """Ask ffmpeg to finish cleanly ('q' on stdin, or end of the yt-dlp pipe), so the
@@ -466,8 +495,16 @@ class Capture:
                 live.mark_heartbeat(self.engine, self.live_id, LiveStatus.RECORDING)
                 self.log(f"Gravando a partir do segmento {st.next_index} "
                          f"(segmentos de {self.segment_seconds}s).")  # fmt: skip
+                known_before = len(st.known)
+                piped = self.feeder is not None
                 stop_reason = self._watch_ffmpeg()
                 self.collect()
+                if piped and len(st.known) == known_before and stop_reason == "ended":
+                    # "Desde o início" gave no video (e.g. YouTube serves video and audio as
+                    # separate streams, which yt-dlp can't pipe together): record from now.
+                    self._disable_from_start()
+                    self.feeder = None
+                    continue
                 if stop_reason == "user":
                     self._finish()
                     return 0

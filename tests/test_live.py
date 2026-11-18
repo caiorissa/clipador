@@ -435,3 +435,23 @@ def test_review_live_filter_puts_auto_clips_first(client, engine, lsettings):
     assert client.get("/ao-vivo/alertas.json").json()["pending"] == 1
     r = client.get("/revisao?status=ao_vivo")
     assert r.status_code == 200 and "AO VIVO" in r.text
+
+
+def test_separate_video_and_audio_streams():
+    """YouTube lives serve HLS video-only + audio-only: ffmpeg gets both inputs and maps them."""
+    from clipador.services.live_capture import stream_input_args
+
+    inp = stream_input_args(["https://v.m3u8", "https://a.m3u8"])
+    assert inp.count("-i") == 2 and inp.count("-reconnect") == 2
+    args = segment_args(inp, Path("/tmp"), 300, 0, separate_audio=True)
+    assert args[args.index("-map") + 1] == "0:v:0" and "1:a:0" in args
+    assert "0:a:0?" in segment_args(["-i", "x"], Path("/tmp"), 300, 0)
+    assert "bv*[height<=1080]+ba" in " ".join(plive.stream_url_args(_FakeYt(), "u", 1080))
+
+
+class _FakeYt:
+    def base_cmd(self):
+        return ["yt-dlp"]
+
+    def common_args(self):
+        return []

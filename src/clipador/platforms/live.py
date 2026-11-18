@@ -151,13 +151,16 @@ def check_live(ytdlp: YtDlp, url: str, timeout: float = 90) -> LiveStatusInfo:
 
 
 def stream_url_args(ytdlp: YtDlp, url: str, max_height: int) -> list[str]:
-    fmt = f"best[height<={max_height}]/best"
+    # Best video + best audio when they are separate streams (YouTube lives: HLS video-only +
+    # audio-only), else the best single stream (Twitch/Kick).
+    h = max_height
+    fmt = f"bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b"
     return [*ytdlp.base_cmd(), *ytdlp.common_args(), "-g", "-f", fmt, "--", url]
 
 
-def resolve_stream_url(ytdlp: YtDlp, url: str, max_height: int, timeout: float = 90) -> str:
-    """Direct media URL (usually an HLS .m3u8) for ffmpeg to record. Raises DownloadError
-    (kind LIVE when the channel is offline)."""
+def resolve_stream_url(ytdlp: YtDlp, url: str, max_height: int, timeout: float = 90) -> list[str]:
+    """Direct media URL(s) for ffmpeg to record (usually HLS .m3u8): one URL, or [video, audio]
+    when the platform serves them separately. Raises DownloadError (kind LIVE when offline)."""
     try:
         res = subprocess.run(
             stream_url_args(ytdlp, url, max_height), capture_output=True, text=True,
@@ -180,7 +183,7 @@ def resolve_stream_url(ytdlp: YtDlp, url: str, max_height: int, timeout: float =
             DownloadErrorKind.UNKNOWN, "O yt-dlp não devolveu o endereço do stream.",
             detail=res.stdout[-2000:], retryable=True,
         )  # fmt: skip
-    return urls[0]
+    return urls[:2]
 
 
 def pipe_download_args(ytdlp: YtDlp, url: str, max_height: int, from_start: bool) -> list[str]:
