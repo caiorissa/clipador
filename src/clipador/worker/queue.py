@@ -152,6 +152,7 @@ def claim(
     worker_id: str,
     allow_gpu: bool = True,
     exclude_types: tuple[str, ...] = (),
+    only_gpu: bool = False,
 ) -> Job | None:
     """Atomically take the oldest runnable queued job. A single UPDATE…WHERE id=(SELECT…) AND
     status='queued' is atomic in SQLite, so two workers can never claim the same job."""
@@ -164,6 +165,8 @@ def claim(
     )
     if not allow_gpu:
         candidate = candidate.where(Job.needs_gpu == False)  # noqa: E712
+    if only_gpu:
+        candidate = candidate.where(Job.needs_gpu == True)  # noqa: E712
     if exclude_types:
         candidate = candidate.where(col(Job.type).not_in(exclude_types))
     stmt = (

@@ -292,9 +292,17 @@ class Worker:
             queue.release_cloud_ai_from_gpu(self.engine)
         gpu_free = self.gpu_lock.acquire(blocking=False)
         try:
-            job = queue.claim(
-                self.engine, self.worker_id, allow_gpu=gpu_free, exclude_types=self._busy_types()
-            )
+            job = None
+            if gpu_free:  # the GPU is free: give it to a job that needs it before anything else
+                job = queue.claim(self.engine, self.worker_id, allow_gpu=True,
+                                  exclude_types=self._busy_types(), only_gpu=True)  # fmt: skip
+            if job is None:
+                job = queue.claim(
+                    self.engine,
+                    self.worker_id,
+                    allow_gpu=gpu_free,
+                    exclude_types=self._busy_types(),
+                )
         except Exception:
             if gpu_free:
                 self.gpu_lock.release()

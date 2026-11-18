@@ -305,3 +305,17 @@ def test_instance_lock_is_exclusive(tmp_path):
     a.release()
     assert b.acquire()
     b.release()
+
+
+def test_free_gpu_goes_to_a_gpu_job_before_higher_priority_cpu_jobs(engine):
+    """With Claude, AI jobs don't use the GPU: they must not keep Whisper waiting."""
+    from clipador.worker import queue as q
+
+    with Session(engine) as s:
+        q.enqueue(s, "enrich", None, {}, dedupe=False, needs_gpu=False, priority=9)
+        gpu = q.enqueue(s, "transcribe", None, {}, dedupe=False, priority=1)
+        s.commit()
+        gpu_id = gpu.id
+    first = q.claim(engine, "w", allow_gpu=True, only_gpu=True)
+    assert first.id == gpu_id
+    assert q.claim(engine, "w", allow_gpu=False).type == "enrich"
