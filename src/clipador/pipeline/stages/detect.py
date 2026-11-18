@@ -55,6 +55,15 @@ class DetectInputs:
             ctx.engine, settings, self.source.id, TRANSCRIBE_STAGE, tr_hash
         )
         if self.transcript is None:
+            # Transcribed with another Whisper setup (e.g. faster-whisper on the PC, now on a
+            # Mac with MLX): still the same audio, so use it instead of failing.
+            old = get_artifact(ctx.engine, self.source.id, TRANSCRIBE_STAGE)
+            files_ok = old is not None and all(
+                settings.abs_path(f).is_file() for f in (old.files or {}).values()
+            )
+            if files_ok and old.status == ArtifactStatus.OK:
+                self.transcript = old
+        if self.transcript is None:
             raise ClipadorError(
                 "Esta fonte ainda não foi transcrita (ou a configuração do Whisper mudou). "
                 "Clique em Analisar para rodar a cadeia completa."

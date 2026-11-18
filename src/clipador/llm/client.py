@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -158,8 +162,139 @@ class OllamaClient:
             )
 
 
+class ClaudeCodeClient:
+    """The Claude Code CLI already installed on this machine, in non-interactive mode
+    (`claude -p`), using the user's Claude subscription: no API key, no extra cost (it counts
+    against the subscription's usage limits).
+
+    Every call is isolated on purpose: own system prompt, NO tools (`--tools ""`: the
+    transcript and chat are third-party text and must never be able to make it act), no MCP
+    servers, no settings/plugins/skills and no saved session. That keeps each call around a
+    thousand tokens instead of the ~240k of a normal Claude Code session.
+    """
+
+    def __init__(self, settings: Settings, binary: str | None = None):
+        self.settings = settings
+        self.binary = binary or settings.claude_binary
+
+    def _exe(self) -> str:
+        exe = shutil.which(self.binary) or (self.binary if Path(self.binary).is_file() else None)
+        if not exe:
+            raise LLMUnavailable(
+                "Claude Code não encontrado neste computador.",
+                "Instale o Claude Code (https://claude.com/download) e entre na sua conta, ou "
+                "use CLAUDE_BINARY / CLIPADOR_LLM_BACKEND=ollama.",
+            )
+        return exe
+
+    def list_models(self) -> list[str]:
+        exe = self._exe()
+        try:
+            r = subprocess.run([exe, "auth", "status"], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=30)  # fmt: skip
+            status = json.loads(r.stdout or "{}")
+        except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+            raise LLMUnavailable(f"Não consegui falar com o Claude Code ({e}).") from e
+        if not status.get("loggedIn"):
+            raise LLMUnavailable("O Claude Code não está logado.", LOGIN_HINT)
+        return [CLAUDE_PREFIX + m for m in CLAUDE_MODELS]
+
+    def chat(
+        self,
+        model: str,
+        messages: list[dict[str, str]],
+        *,
+        schema: dict[str, Any] | None,
+        temperature: float,
+        num_ctx: int,
+        keep_alive: str | int,
+        timeout: float,
+        num_predict: int | None = None,
+    ) -> LLMResponse:
+        exe = self._exe()
+        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        convo = [m for m in messages if m["role"] != "system"]
+        if len(convo) == 1:
+            prompt = convo[0]["content"]
+        else:  # a retry with a correction: replay the exchange as text
+            prompt = "\n\n".join(f"[{m['role'].upper()}]\n{m['content']}" for m in convo)
+        workdir = self.settings.tmp_dir / "claude"
+        workdir.mkdir(parents=True, exist_ok=True)  # empty dir: no CLAUDE.md is picked up
+        cmd = [
+            exe, "-p", "--output-format", "json", "--tools", "", "--no-session-persistence",
+            "--model", model.removeprefix(CLAUDE_PREFIX) or self.settings.claude_model,
+            "--system-prompt", system or "Responda só no formato pedido.",
+            "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+            "--setting-sources", "", "--disable-slash-commands",
+        ]  # fmt: skip
+        if schema is not None:
+            cmd += ["--json-schema", json.dumps(schema)]
+        t0 = time.monotonic()
+        try:
+            r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=timeout,
+                               cwd=str(workdir))  # fmt: skip
+        except subprocess.TimeoutExpired as e:
+            raise LLMNetworkError(f"Claude Code demorou mais de {timeout:.0f}s") from e
+        except OSError as e:
+            raise LLMUnavailable(f"Não consegui rodar o Claude Code ({e}).") from e
+        latency = int((time.monotonic() - t0) * 1000)
+        try:
+            data = json.loads(r.stdout)
+        except ValueError as e:
+            raise self._failure(r.stderr or r.stdout) from e
+        if data.get("is_error") or data.get("subtype") != "success":
+            raise self._failure(str(data.get("result") or data.get("api_error_status") or data))
+        out = data.get("structured_output")
+        content = json.dumps(out, ensure_ascii=False) if out is not None else data.get("result", "")
+        usage = data.get("usage") or {}
+        prompt_tokens = sum(int(usage.get(k) or 0) for k in (
+            "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))  # fmt: skip
+        return LLMResponse(content=content, latency_ms=latency, prompt_tokens=prompt_tokens,
+                           output_tokens=usage.get("output_tokens"))  # fmt: skip
+
+    @staticmethod
+    def _failure(text: str) -> LLMError:
+        low = text.lower()
+        if any(
+            k in low for k in ("usage limit", "rate limit", "limit reached", "429", "overloaded")
+        ):
+            return LLMUnavailable(
+                "Limite de uso da sua assinatura do Claude atingido por agora.",
+                "Espere o limite renovar, ou use CLIPADOR_LLM_BACKEND=ollama nesse meio-tempo.",
+            )
+        if any(k in low for k in ("not logged", "log in", "login", "authentication", "401")):
+            return LLMUnavailable("O Claude Code não está logado.", LOGIN_HINT)
+        return LLMError(f"Claude Code: {text.strip()[:300]}")
+
+    def unload(self, model: str) -> None:
+        """Nothing to free: Claude runs in Anthropic's cloud."""
+
+
+CLAUDE_PREFIX = "claude:"
+LOGIN_HINT = "Abra um terminal, rode `claude` e entre na sua conta."
+LIMIT_WORDS = ("usage limit", "rate limit", "limit reached", "429", "overloaded")
+CLAUDE_MODELS = ("sonnet", "opus", "haiku")
+
+
+def default_model(settings: Settings) -> str:
+    """Model the enrich stage uses when none is given."""
+    if settings.llm_backend == "claude":
+        return CLAUDE_PREFIX + settings.claude_model
+    return settings.llm_model
+
+
+def prompt_name(settings: Settings) -> str:
+    """The enrich prompt to use (CLIPADOR_ENRICH_PROMPT, or by backend when 'auto')."""
+    if settings.enrich_prompt != "auto":
+        return settings.enrich_prompt
+    return "enrich_v2" if settings.llm_backend == "claude" else "enrich_v1"
+
+
 def make_llm_client(settings: Settings) -> LLMClient:
     """Factory used by the enrich stage, doctor and CLI (tests monkeypatch it)."""
+    if settings.llm_backend == "claude":
+        return ClaudeCodeClient(settings)
     return OllamaClient(settings.llm_base_url)
 
 
@@ -174,8 +309,16 @@ class OllamaStatus:
 
 
 def ollama_status(settings: Settings) -> OllamaStatus:
-    """For the UI/doctor: is Ollama up, which models, is the configured one installed."""
+    """For the UI/doctor: is the AI backend up (Ollama, or Claude Code logged in), which
+    models, is the configured one available."""
     client = make_llm_client(settings)
+    if settings.llm_backend == "claude":
+        try:
+            models = client.list_models()
+        except LLMUnavailable as e:
+            return OllamaStatus(False, [], default_model(settings), False, e.message, e.hint)
+        msg = f"Claude ({settings.claude_model}) pela sua assinatura: ok."
+        return OllamaStatus(True, models, default_model(settings), True, msg)
     try:
         models = client.list_models()
     except LLMUnavailable as e:

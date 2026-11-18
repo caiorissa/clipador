@@ -4,7 +4,8 @@ Os prompts usados com o LLM local (Ollama) ficam aqui, versionados no git.
 
 | Arquivo | Uso |
 |---|---|
-| `enrich_v1.md` | Mensagem de sistema do estágio `enrich`: notas, motivo, alertas, títulos, descrição e hashtags. |
+| `enrich_v1.md` | Mensagem de sistema do estágio `enrich` para modelos locais pequenos (Ollama): notas, motivo, alertas, títulos, descrição e hashtags. |
+| `enrich_v2.md` | Versão mais exigente (o que vale um corte, o que jogar fora, títulos de gancho). Padrão quando a IA é o Claude (`CLIPADOR_LLM_BACKEND=claude`). |
 
 ## Como editar
 

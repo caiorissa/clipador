@@ -240,8 +240,16 @@ def check_disk(settings: Settings) -> CheckResult:
 
 
 def check_ollama(settings: Settings) -> list[CheckResult]:
-    """Reachable? configured model installed? quick generation latency."""
+    """Reachable? configured model installed? quick generation latency. With
+    CLIPADOR_LLM_BACKEND=claude: is the Claude Code CLI installed and logged in."""
     from clipador.llm.client import LLMError, make_llm_client, ollama_status
+
+    if settings.llm_backend == "claude":
+        st = ollama_status(settings)
+        if st.ok:
+            return [CheckResult("IA (Claude)", CheckStatus.OK, st.message + " Sem custo extra: "
+                                "usa o limite da sua assinatura.")]  # fmt: skip
+        return [CheckResult("IA (Claude)", CheckStatus.WARN, st.message, st.hint)]
 
     st = ollama_status(settings)
     if not st.ok:

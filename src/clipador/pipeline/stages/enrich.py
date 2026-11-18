@@ -108,7 +108,7 @@ class EnrichStage(Stage):
         targets = set(payload.get("candidate_ids") or [])
         k = int(payload.get("k") or settings.enrich_k)
         cands = [c for c in cands if c.id in targets] if targets else cands[:k]
-        model = payload.get("model") or settings.llm_model
+        model = payload.get("model") or llm_client.default_model(settings)
         instruction = payload.get("instruction", "")
         overwrite = bool(payload.get("overwrite_edited"))
         game = source.game or settings.default_game
@@ -127,7 +127,7 @@ class EnrichStage(Stage):
                 load_chat(settings.abs_path(inp.chat.files["chat"])).messages if inp.chat else None
             )
         chat_delay = float(run.params.get("features", {}).get("chat_delay_s", 5.0))
-        prompt = load_prompt(settings.prompts_path, settings.enrich_prompt)
+        prompt = load_prompt(settings.prompts_path, llm_client.prompt_name(settings))
         phash = params_hash({"run": run.id, "model": model, "prompt": prompt.version})
 
         def drafts_for(c: Candidate, out: EnrichOutput | None, s) -> str | None:

@@ -121,7 +121,9 @@ def run_bench(
 ) -> list[ModelResult]:
     client = llm_client.make_llm_client(settings)
     installed = client.list_models()  # LLMUnavailable propagates to the CLI
-    prompt = load_prompt(settings.prompts_path, settings.enrich_prompt)
+    from clipador.llm.client import prompt_name
+
+    prompt = load_prompt(settings.prompts_path, prompt_name(settings))
     results = []
     for model in models:
         r = ModelResult(model, llm_client.model_installed(installed, model))

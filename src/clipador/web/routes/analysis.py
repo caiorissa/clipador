@@ -11,6 +11,7 @@ from sqlmodel import Session, col, select
 from clipador.config import Settings
 from clipador.detection.params import SIGNAL_LABELS, SIGNALS, DetectParams
 from clipador.errors import ClipadorError, ValidationError
+from clipador.llm.client import default_model as llm_default_model
 from clipador.llm.drafts import DRAFT_LABELS, DRAFT_PLATFORMS, clean_hashtags, clean_text
 from clipador.llm.scoring import RankingParams
 from clipador.models import (
@@ -108,7 +109,7 @@ def source_detail(
         ranking=ranking,
         enrich_art=enrich_art,
         llm_model=(enrich_art.summary.get("model") if enrich_art and enrich_art.summary else None)
-        or settings.llm_model,
+        or llm_default_model(settings),
         enrich_k=settings.enrich_k,
         game=source.game or settings.default_game,
         draft_platforms=DRAFT_PLATFORMS,

@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     # TwitchDownloaderCLI executable (https://github.com/lay295/TwitchDownloader/releases).
     twitch_downloader_path: str = "TwitchDownloaderCLI"
 
+    # --- AI judge: "claude" = Claude Code CLI with your Claude subscription (best choices and
+    # titles, no extra cost, counts against the subscription limits); "ollama" = local model.
+    llm_backend: str = "ollama"
+    claude_model: str = "sonnet"  # sonnet | opus | haiku
+    claude_binary: str = "claude"
+
     # --- local LLM (Ollama) ---
     llm_host: str = ""  # empty = ollama_url
     # ~7-8B instruct, quantized (fits 8 GB with room for context). Alternatives: llama3.1:8b,
@@ -79,7 +85,9 @@ class Settings(BaseSettings):
     llm_max_candidates: int = 30
     default_game: str = "GTA 6"
     prompts_dir: Path | None = None  # default: <project>/prompts
-    enrich_prompt: str = "enrich_v1"  # prompts/<name>.md
+    # prompts/<name>.md; "auto" = enrich_v2 (stricter, hook titles) with Claude, enrich_v1 with
+    # a small local model
+    enrich_prompt: str = "auto"
     # final score = w_detect * detection + w_llm * llm (both 0-100), minus penalties
     rank_weight_detect: float = 0.5
     rank_weight_llm: float = 0.5

@@ -76,6 +76,21 @@ uv run clipador eval 1 --golden golden.txt   # recall@5/10/20, precisão@N e mom
 
 Os botões Bom/Ruim da página entram na precisão@N.
 
+## IA que escolhe os momentos: Claude (recomendado) ou Ollama
+
+Com `CLIPADOR_LLM_BACKEND=claude` no `.env`, quem avalia os candidatos e escreve títulos,
+texto de abertura e legendas é o **Claude**, pelo **Claude Code instalado neste computador**
+e a **sua assinatura** do Claude: sem chave de API e sem custo extra (conta no limite de uso da
+assinatura). Ele é bem mais exigente que um modelo local pequeno: derruba encerramentos de
+live, conversas de bastidor e trechos que só fazem sentido com contexto, e escreve ganchos
+melhores. Usa o prompt `prompts/enrich_v2.md`.
+
+Cada chamada é isolada: instrução própria, **sem ferramentas** (a transcrição e o chat são
+texto de terceiros e não podem fazer o modelo agir), sem MCP, sem plugins e sem salvar
+sessão, ~5 mil tokens e ~5 s por candidato. Escolha o modelo com `CLIPADOR_CLAUDE_MODEL`
+(`sonnet`, `opus`, `haiku`). Se o limite da assinatura acabar, a etapa avisa e a nota de
+detecção continua valendo; `CLIPADOR_LLM_BACKEND=ollama` volta para a IA local.
+
 ## IA local (Passo 3, opcional)
 
 Com o [Ollama](https://ollama.com/download) rodando, o estágio **IA (Ollama)** (último da cadeia
