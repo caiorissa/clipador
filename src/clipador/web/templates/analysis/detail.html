@@ -3,7 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
 <script src="/static/vendor/uPlot.iife.min.js"></script>
-<script src="/static/caption_editor.js"></script>
+<script src="/static/caption_editor.js?v={{ static_v }}"></script>
 
 <div class="page-head">
   <div>
@@ -95,8 +95,8 @@
     </section>
 
     <div class="side">
-    <aside class="card ai-panel">
-      <h2>IA local (Ollama)</h2>
+    <details class="card ai-panel">
+      <summary>🤖 IA local (Ollama)</summary>
       <div hx-get="/sistema/ollama" hx-trigger="load" hx-swap="innerHTML"><span class="small muted">verificando o Ollama…</span></div>
       {% if enrich_art and enrich_art.summary %}
         <p class="small muted">Último enriquecimento: {{ enrich_art.summary.get('model') }} · {{ enrich_art.summary.get('ok', 0) }} avaliados, {{ enrich_art.summary.get('cached', 0) }} do cache, {{ enrich_art.summary.get('failed', 0) }} falharam{% if enrich_art.summary.get('avg_latency_ms') %} · {{ (enrich_art.summary.avg_latency_ms / 1000)|round(1) }} s/candidato{% endif %}</p>
@@ -129,10 +129,10 @@
         <p class="small muted">Reordenar não chama a IA: recalcula na hora.</p>
       </form>
       {% endif %}
-    </aside>
+    </details>
 
-    <aside class="card tuning">
-      <h2>Ajustes da detecção</h2>
+    <details class="card tuning">
+      <summary>🎚 Ajustes da detecção</summary>
       {% set cp = params.candidates %}
       <form method="post" action="/fontes/{{ source.id }}/reanalisar" id="tuning">
         <label>Preset
@@ -157,7 +157,7 @@
         <p class="small muted">Reanalisar roda só a detecção (usa a transcrição e as features em cache): leva segundos.</p>
       </form>
       <div hx-get="/fontes/{{ source.id }}/calibracao" hx-trigger="load" hx-swap="innerHTML"><span class="small muted">calculando a calibração…</span></div>
-    </aside>
+    </details>
     </div>
   </div>
 {% else %}

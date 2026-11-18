@@ -44,7 +44,8 @@ def test_pages_render(client):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "Clipador" in r.text
-    assert client.get("/", follow_redirects=False).headers["location"] == "/fontes"
+    home = client.get("/")
+    assert home.status_code == 200 and "Para revisar" in home.text
 
 
 def test_create_streamer_with_three_channels(client):

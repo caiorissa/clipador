@@ -5,7 +5,8 @@
      data-active="{{ '1' if stages|selectattr('active')|list else '0' }}">
   {% for st in stages %}
     {% set j = st.job %}{% set a = st.artifact %}
-    <div class="stage">
+    {% set state = 'is-running' if j and j.status in ('queued', 'running') else ('is-failed' if j and j.status == 'failed' else ('is-done' if a and a.status != 'skipped' else '')) %}
+    <div class="step {{ state }}">
       <div class="stage-name">{{ st.label }}</div>
       {% if j and j.status in ('queued', 'running') %}
         <span class="status status-{{ j.status }}">{{ JOB_STATUS_LABELS[j.status] }}</span>

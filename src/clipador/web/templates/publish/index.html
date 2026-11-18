@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Publicar{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Publicar</h1>
+<div class="page-head"><div><h1>Publicar</h1><p class="lead">Suas contas, a fila de postagens e o histórico com os números.</p></div>
   {% if accs %}
   <form method="post" action="/publicar/pausar-tudo" class="cand-actions">
     {% set any_active = accs|selectattr('paused', 'equalto', false)|list %}
@@ -10,7 +10,7 @@
   </form>
   {% endif %}
 </div>
-<p class="muted">Só clips que <strong>você aprovou</strong> são postados. Com a postagem automática ligada numa conta,
+<p class="flash small">Só clips que <strong>você aprovou</strong> são postados. Com a postagem automática ligada numa conta,
   cada clip aprovado dos streamers dela entra sozinho na grade de horários e é enviado na hora certa
   (o worker precisa estar rodando). Alertas fortes da IA ou música no trecho seguram o clip para você liberar.</p>
 

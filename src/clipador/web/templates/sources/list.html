@@ -1,9 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Fontes{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Fontes</h1></div>
+<div class="page-head">
+  <div><h1>Fontes</h1>
+    <p class="lead">VODs e clips já gravados. Adicione um link, o Clipador baixa, analisa e sugere os melhores momentos.</p></div>
+  <a class="btn" href="/ao-vivo">● Gravar uma live</a>
+</div>
 
 <form method="post" action="/fontes" class="card form">
+  <h2>Adicionar VOD ou clip</h2>
   <label>URL do VOD ou clip (Twitch, YouTube ou Kick)
     <input name="url" required autocomplete="off" value="{{ form.get('url', '') }}"
            placeholder="https://www.twitch.tv/videos/… · https://youtu.be/… · https://kick.com/canal/videos/…"

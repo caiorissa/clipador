@@ -1,12 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Ao vivo{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Ao vivo</h1>
+<div class="page-head"><div><h1>Ao vivo</h1><p class="lead">Grave lives enquanto acontecem: o Clipador analisa cada pedaço assim que fecha e já gera a prévia dos melhores momentos. Nada é aprovado nem publicado sozinho: você decide na <a href="/revisao?status=ao_vivo">Revisão</a>.</p></div>
   <button type="button" class="btn small" id="live-notify-btn" hidden>🔔 Avisar quando sair um corte</button>
 </div>
-<p class="muted">Grava a live em segmentos, analisa cada um assim que fecha e gera a prévia dos melhores
-  momentos sozinho. Nada é aprovado nem publicado: você decide na <a href="/revisao?status=ao_vivo">Revisão</a>.
-  O worker precisa estar rodando (<code>uv run clipador worker</code>).</p>
+
 
 <form method="post" action="/ao-vivo" class="card form">
   <label>Link do canal ao vivo (Twitch, Kick ou YouTube)
@@ -40,6 +38,6 @@
 <div id="live-sessions" hx-get="/ao-vivo/sessoes" hx-trigger="every 3s" hx-swap="innerHTML">
   {% include "live/_sessions.html" %}
 </div>
-<p class="small muted">Simular sem internet: <code>uv run clipador live --simular data\vods\1\video.mp4 --velocidade 10</code>.
+<p class="small muted">Simular sem internet: <code>uv run clipador live --simular data/vods/1/video.mp4 --velocidade 10</code>.
   Para gravar sozinho quando um streamer entrar ao vivo, ligue "Vigiar lives" no cadastro dele.</p>
 {% endblock %}

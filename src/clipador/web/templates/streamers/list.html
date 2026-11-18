@@ -2,10 +2,10 @@
 {% block title %}Streamers{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Streamers</h1>
+  <div><h1>Streamers</h1>
+    <p class="lead">Só clipe quem autorizou: fontes de streamers sem autorização confirmada são bloqueadas.</p></div>
   <a class="btn primary" href="/streamers/novo">+ Novo streamer</a>
 </div>
-<p class="muted">Só clipe quem autorizou. Fontes de streamers sem autorização confirmada são bloqueadas.</p>
 
 {% if not streamers %}
   <div class="empty">Nenhum streamer cadastrado ainda. <a href="/streamers/novo">Cadastre o primeiro</a>.</div>

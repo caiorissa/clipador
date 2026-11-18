@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Jobs{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Jobs</h1></div>
-<p class="muted">Atualiza sozinho a cada 2 s. O worker precisa estar rodando (<code>uv run clipador worker</code>).</p>
+<div class="page-head">
+  <div><h1>Jobs</h1>
+    <p class="lead">Tudo que o Clipador está fazendo em segundo plano. Atualiza sozinho a cada 2 s; o worker precisa estar rodando (<code>uv run clipador worker</code>).</p></div>
+</div>
 <div id="jobs-table" hx-get="/jobs/tabela" hx-trigger="every 2s" hx-swap="innerHTML">
   {% include "jobs/_table.html" %}
 </div>

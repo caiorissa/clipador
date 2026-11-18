@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Início{% endblock %}
+{% block content %}
+{% set r = d.review %}{% set st = d.setup %}
+<div class="hero">
+  <div>
+    <h1>Olá! 👋</h1>
+    <p class="muted" style="margin:.3rem 0 0">
+      {% if r.suggested %}Você tem <strong style="color:var(--text)">{{ r.suggested }} clip{{ 's' if r.suggested != 1 }}</strong> esperando revisão.
+      {% else %}Tudo revisado por enquanto.{% endif %}
+      {% if d.autopost_on %}{{ d.autopost_on }} conta{{ 's' if d.autopost_on != 1 }} postando sozinha{{ 's' if d.autopost_on != 1 }}.{% endif %}
+    </p>
+  </div>
+  <div class="cand-actions" style="margin:0">
+    <a class="btn" href="/fontes">+ Adicionar VOD</a>
+    <a class="btn" href="/ao-vivo">● Gravar live</a>
+    <a class="btn primary" href="/revisao">Revisar clips →</a>
+  </div>
+</div>
+
+<div class="stats">
+  <a class="stat-card {{ 'attention' if r.suggested }}" href="/revisao">
+    <span class="label">Para revisar</span>
+    <span class="value">{{ r.suggested }}</span>
+    <span class="hint">{{ r.approved }} aprovados · {{ r.skipped }} pulados</span>
+  </a>
+  <a class="stat-card {{ 'hot' if d.lives }}" href="/ao-vivo">
+    <span class="label">Ao vivo agora</span>
+    <span class="value">{{ d.lives|length }}</span>
+    <span class="hint">{% if d.lives %}gravando e clipando{% else %}nenhuma live gravando{% endif %}</span>
+  </a>
+  <a class="stat-card {{ 'warn' if d.held }}" href="/publicar">
+    <span class="label">Postagens agendadas</span>
+    <span class="value">{{ d.upcoming|length }}{% if d.upcoming|length == 6 %}+{% endif %}</span>
+    <span class="hint">{% if d.held %}{{ d.held|length }} segurada{{ 's' if d.held|length != 1 }} esperando você{% else %}{{ d.published_today }} publicada{{ 's' if d.published_today != 1 }} nas últimas 24 h{% endif %}</span>
+  </a>
+  <a class="stat-card {{ 'hot' if d.failed }}" href="/jobs">
+    <span class="label">Processando</span>
+    <span class="value">{{ d.running|length }}</span>
+    <span class="hint">{% if d.failed %}{{ d.failed|length }} falha{{ 's' if d.failed|length != 1 }} nas últimas 24 h{% else %}sem falhas nas últimas 24 h{% endif %}</span>
+  </a>
+</div>
+
+{% if st.streamers == 0 or st.sources == 0 or st.accounts == 0 %}
+<section class="card">
+  <h2>Primeiros passos</h2>
+  <ol class="steps">
+    <li class="{{ 'done' if st.authorized }}"><span>Cadastre um streamer que autoriza clipes — <a href="/streamers/novo">Streamers</a></span></li>
+    <li class="{{ 'done' if st.sources }}"><span>Adicione um VOD ou grave uma live — <a href="/fontes">Fontes</a> · <a href="/ao-vivo">Ao vivo</a></span></li>
+    <li class="{{ 'done' if r.approved }}"><span>Aprove os melhores momentos — <a href="/revisao">Revisão</a></span></li>
+    <li class="{{ 'done' if st.accounts }}"><span>Conecte suas contas e ligue a postagem automática — <a href="/publicar">Publicar</a></span></li>
+  </ol>
+</section>
+{% endif %}
+
+<div class="dash-grid">
+  <div>
+    {% if d.lives %}
+    <section class="card">
+      <div class="page-head compact"><h2><span class="dot-live"></span> Gravando agora</h2><a class="btn small" href="/ao-vivo">Abrir</a></div>
+      <ul class="list">
+        {% for row in d.lives %}
+        <li><span class="badge live">AO VIVO</span>
+          <span class="grow">{{ row.source.title if row.source else 'live' }}</span>
+          <span class="small muted">{{ row.stats.captured_s|duration }} · {{ row.stats.candidates }} cand.</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <section class="card">
+      <div class="page-head compact"><h2>Fontes recentes</h2><a class="btn small" href="/fontes">Ver todas</a></div>
+      {% if d.sources %}
+      <ul class="list">
+        {% for s in d.sources %}
+        <li>
+          {% if s.thumbnail_path %}<img src="/arquivos/{{ s.thumbnail_path }}" alt="">{% endif %}
+          <a class="grow" href="/fontes/{{ s.id }}">{{ s.title or s.url }}</a>
+          <span class="badge platform-{{ s.platform }}">{{ s.platform|platform_label }}</span>
+          <span class="status status-{{ s.status }}">{{ SOURCE_STATUS_LABELS.get(s.status, s.status) }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<div class="empty">Nenhuma fonte ainda. <a href="/fontes">Adicione um VOD</a> ou <a href="/ao-vivo">grave uma live</a>.</div>{% endif %}
+    </section>
+
+    {% if d.failed %}
+    <section class="card">
+      <div class="page-head compact"><h2>Falhas recentes</h2><a class="btn small" href="/jobs">Jobs</a></div>
+      <ul class="list">
+        {% for j in d.failed %}
+        <li><span class="status status-failed">✕</span>
+          <span class="grow">{{ JOB_TYPE_LABELS.get(j.type, j.type) }} — <span class="muted">{{ j.error or 'falhou' }}</span></span>
+          <a class="btn small" href="/jobs/{{ j.id }}">Log</a></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </div>
+
+  <div>
+    <section class="card">
+      <div class="page-head compact"><h2>Próximas postagens</h2><a class="btn small" href="/publicar">Publicar</a></div>
+      {% if d.held %}<div class="flash warn small">{{ d.held|length }} clip{{ 's' if d.held|length != 1 }} segurado{{ 's' if d.held|length != 1 }} (alerta da IA ou música) — <a href="/publicar">liberar ou cancelar</a>.</div>{% endif %}
+      {% if d.upcoming %}
+      <ul class="list">
+        {% for p in d.upcoming %}
+        <li><span class="small muted" style="min-width:5.5rem">{{ p.scheduled_for|dt }}</span>
+          <span class="grow">{{ p.title or 'clip' }}</span>
+          <span class="badge platform-{{ p.platform }}">{{ 'TikTok' if p.platform == 'tiktok' else 'YouTube' }}</span></li>
+        {% endfor %}
+      </ul>
+      {% elif not d.accounts %}
+        <div class="empty small">Nenhuma conta conectada. <a href="/publicar">Conectar YouTube ou TikTok</a></div>
+      {% else %}
+        <div class="empty small">Nada agendado. Aprove clips na Revisão para encher a fila.</div>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Atalhos</h2>
+      <div class="quick">
+        <a class="btn" href="/revisao?status=ao_vivo">⚡ Cortes das lives</a>
+        <a class="btn" href="/revisao?status=prontos">✔ Prontos para publicar</a>
+        <a class="btn" href="/streamers/novo">+ Novo streamer</a>
+        <a class="btn" href="/sistema">⚙ Verificar o ambiente</a>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
