@@ -174,7 +174,11 @@ def connect(request: Request, platform: str, settings: SettingsDep, projeto: str
     state = secrets.token_urlsafe(24)
     redirect_uri = _redirect_uri(request, settings, platform)
     _PENDING_AUTH[state] = (platform, verifier, redirect_uri, projeto)
-    return RedirectResponse(mod.auth_url(client, redirect_uri, state, challenge), 303)
+    if platform == "tiktok":
+        url = tiktok.auth_url(client, redirect_uri, state, challenge, settings.tiktok_mode)
+    else:
+        url = youtube.auth_url(client, redirect_uri, state, challenge)
+    return RedirectResponse(url, 303)
 
 
 @router.get("/publicar/{platform}/callback", name="oauth_callback")

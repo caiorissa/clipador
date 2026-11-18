@@ -169,6 +169,9 @@ class Settings(BaseSettings):
     # TikTok only accepts https redirect URIs: an https page that forwards to this app's
     # /publicar/tiktok/callback (e.g. a GitHub Pages relay). Empty = this app's own URL.
     tiktok_redirect_uri: str = ""
+    # direct = posts by itself (needs the video.publish scope / Direct Post enabled);
+    # inbox = video.upload: the clip arrives as a draft in the TikTok app, you post it there.
+    tiktok_mode: str = "direct"
 
     # --- detection ---
     detect_preset: str = "equilibrado"  # equilibrado | foco_chat | foco_audio | foco_fala

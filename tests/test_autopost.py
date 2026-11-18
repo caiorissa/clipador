@@ -440,3 +440,17 @@ def test_tiktok_uses_the_https_relay_redirect(ysettings, engine):
         "redirect_uri=https%3A%2F%2Fexemplo.github.io%2Fsite%2Ftiktok-callback.html"
         in (r.headers["location"])
     )
+
+
+def test_tiktok_inbox_mode_uses_video_upload(ysettings, fake_tt, tmp_path):
+    ysettings.tiktok_mode = "inbox"
+    url = tiktok.auth_url(tiktok.load_client(ysettings), "https://x/cb", "s", "c", "inbox")
+    assert "video.upload" in url and "video.publish" not in url
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"2" * 100)
+    store = youtube.MemoryStore({"access_token": "a", "refresh_token": "r",
+                                 "expires_at": time.time() + 999})  # fmt: skip
+    client = tiktok.TikTok(ysettings, store=store)
+    _pid, used = client.upload(video, "legenda", "PUBLIC_TO_EVERYONE")
+    assert used == tiktok.INBOX and fake_tt.init is not None and "post_info" not in fake_tt.init
+    assert fake_tt.uploaded == b"2" * 100

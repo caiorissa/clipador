@@ -61,17 +61,27 @@ class PublishStage(Stage):
             publish_id, used = client.upload(
                 video, p.description, privacy, lambda f: ctx.progress(80 * f)
             )
-            if used != privacy:
+            if used == tiktok.INBOX:
+                pass
+            elif used != privacy:
                 ctx.log(
                     f"AVISO: o TikTok só permitiu '{tiktok.PRIVACY_LABELS.get(used, used)}' "
                     "(app ainda não aprovado pelo TikTok?)."
                 )
             ctx.progress(85, "Esperando o TikTok processar…")
             post_id = client.wait_published(publish_id)
+            if used == tiktok.INBOX:
+                ctx.log(
+                    "Rascunho enviado para a caixa de entrada do app do TikTok: abra a "
+                    "notificação no celular, cole a legenda abaixo e publique."
+                )
+                ctx.log(f"Legenda: {p.description}")
             ext, url = post_id or publish_id, None
             if post_id:
                 url = f"https://www.tiktok.com/@{acc.name}/video/{post_id}"
             privacy_used = "public" if used == "PUBLIC_TO_EVERYONE" else "private"
+            if used == tiktok.INBOX:
+                privacy_used = "private"  # unknown until you post it in the app
         else:
             publish_at = p.publish_at
             if publish_at is None and p.auto and p.scheduled_for:

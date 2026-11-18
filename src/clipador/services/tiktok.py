@@ -30,7 +30,15 @@ from clipador.services.youtube import MemoryStore, TokenStore
 AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 API = "https://open.tiktokapis.com/v2"
 TOKEN_URL = f"{API}/oauth/token/"
-SCOPES = ("user.info.basic", "video.publish", "video.list")
+SCOPES = ("user.info.basic", "video.publish", "video.list")  # direct post
+INBOX_SCOPES = ("user.info.basic", "video.upload", "video.list")  # draft in the TikTok inbox
+INBOX = "INBOX"  # "privacy" returned by upload() in inbox mode: the user finishes in the app
+
+
+def scopes_for(mode: str) -> tuple[str, ...]:
+    return INBOX_SCOPES if mode == "inbox" else SCOPES
+
+
 MIN_CHUNK = 5 * 1024 * 1024
 MAX_SINGLE = 64 * 1024 * 1024
 CHUNK = 10 * 1024 * 1024
@@ -75,7 +83,9 @@ def new_pkce() -> tuple[str, str]:
     return verifier, hashlib.sha256(verifier.encode()).hexdigest()
 
 
-def auth_url(client: Client, redirect_uri: str, state: str, challenge: str) -> str:
+def auth_url(
+    client: Client, redirect_uri: str, state: str, challenge: str, mode: str = "direct"
+) -> str:
     return (
         AUTH_URL
         + "?"
@@ -84,7 +94,7 @@ def auth_url(client: Client, redirect_uri: str, state: str, challenge: str) -> s
                 "client_key": client.key,
                 "redirect_uri": redirect_uri,
                 "response_type": "code",
-                "scope": ",".join(SCOPES),
+                "scope": ",".join(scopes_for(mode)),
                 "state": state,
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",
@@ -219,7 +229,11 @@ class TikTok:
         privacy: str,
         progress_cb: Callable[[float], None] = lambda f: None,
     ) -> tuple[str, str]:
-        """Direct post. Returns (publish_id, privacy actually used)."""
+        """Direct post (video.publish), or with CLIPADOR_TIKTOK_MODE=inbox (video.upload) a
+        draft sent to the TikTok app's inbox, where the user adds the caption and posts.
+        Returns (publish_id, privacy actually used | INBOX)."""
+        if self.settings.tiktok_mode == "inbox":
+            return self._upload_inbox(video, progress_cb), INBOX
         info = self.creator_info()
         options = info.get("privacy_level_options") or ["SELF_ONLY"]
         used = (
@@ -255,6 +269,46 @@ class TikTok:
         publish_id, url = d.get("publish_id"), d.get("upload_url")
         if not publish_id or not url:
             raise TikTokError("O TikTok não abriu o envio.", retryable=True)
+        self._put_chunks(video, url, size, chunk, count, progress_cb)
+        return publish_id, used
+
+    @staticmethod
+    def _plan(size: int) -> tuple[int, int]:
+        if size <= MAX_SINGLE:
+            return size, 1
+        return CHUNK, size // CHUNK  # the last chunk takes the remainder
+
+    def _upload_inbox(self, video: Path, progress_cb: Callable[[float], None]) -> str:
+        size = video.stat().st_size
+        chunk, count = self._plan(size)
+        d = self._call(
+            "POST",
+            "/post/publish/inbox/video/init/",
+            "o início do envio",
+            json={
+                "source_info": {
+                    "source": "FILE_UPLOAD",
+                    "video_size": size,
+                    "chunk_size": chunk,
+                    "total_chunk_count": count,
+                }
+            },
+        )
+        publish_id, url = d.get("publish_id"), d.get("upload_url")
+        if not publish_id or not url:
+            raise TikTokError("O TikTok não abriu o envio.", retryable=True)
+        self._put_chunks(video, url, size, chunk, count, progress_cb)
+        return publish_id
+
+    def _put_chunks(
+        self,
+        video: Path,
+        url: str,
+        size: int,
+        chunk: int,
+        count: int,
+        progress_cb: Callable[[float], None],
+    ) -> None:
         with video.open("rb") as f:
             for i in range(count):
                 start = i * chunk
@@ -278,7 +332,6 @@ class TikTok:
                         retryable=True,
                     )
                 progress_cb((i + 1) / count)
-        return publish_id, used
 
     def status(self, publish_id: str) -> dict[str, Any]:
         return self._call(
@@ -299,6 +352,8 @@ class TikTok:
             if s == "PUBLISH_COMPLETE":
                 ids = st.get("publicaly_available_post_id") or st.get("publicly_available_post_id")
                 return str(ids[0]) if ids else None
+            if s == "SEND_TO_USER_INBOX" and self.settings.tiktok_mode == "inbox":
+                return None  # the draft is in the app: the user posts it from there
             if s == "FAILED":
                 raise TikTokError(f"O TikTok recusou o vídeo ({st.get('fail_reason', '?')}).")
             sleep(5)
