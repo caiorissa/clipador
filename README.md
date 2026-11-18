@@ -20,6 +20,7 @@ legendados para YouTube Shorts, TikTok e Instagram Reels. Tudo roda local e de g
   publicar ("pronto para publicar") e calibração dos pesos com `clipador calibrate`.
 - Passo 5C: detecção automática da facecam (`clipador facecam`, "Detectar de novo").
 - Passo 6: publicar no YouTube (API oficial, agendamento) e números de volta na calibração.
+- Passo 6B: várias contas (YouTube e TikTok) com postagem automática dos clips aprovados.
 - Passo 5E: lives ao vivo (gravação em segmentos, análise incremental, clipagem automática com
   prévia, aviso no navegador) e prévias automáticas dos melhores candidatos.
 
@@ -309,6 +310,44 @@ Configurar (uma vez, grátis):
    computador; "Desconectar" apaga).
 
 A cota gratuita da API permite cerca de **6 envios por dia**.
+
+## Contas e postagem automática (Passo 6B)
+
+Em **Publicar → Contas** você conecta **vários canais do YouTube** e **contas do TikTok** e liga
+a **postagem automática** de cada uma. A regra não muda: **só clips que você aprovou** são
+postados. Ao aprovar na Revisão, o clip entra sozinho na grade da conta.
+
+Por conta:
+- **streamers** dela (nenhum marcado = todos);
+- **horários** (ex.: `12:00, 18:00, 21:00`) ou **postar assim que aprovar**;
+- **máximo por dia** e **intervalo mínimo** entre posts;
+- **visibilidade**;
+- **segurar** clips com alerta forte da IA ou com música no trecho (você clica em **Liberar**);
+- **pausar** (ou **Pausar tudo** no topo).
+
+Só entram os clips aprovados **depois** de ligar a postagem automática; os antigos você publica à
+mão. A **fila** mostra o que está agendado, segurado e sendo enviado, com **Postar agora** e
+**Cancelar**. O worker precisa estar rodando.
+
+- **YouTube:** o vídeo sobe até 12 h antes do horário (`CLIPADOR_YOUTUBE_UPLOAD_LEAD_HOURS`),
+  privado, e fica público sozinho na hora, mesmo com o PC desligado. Cota grátis: ~6 envios por
+  dia por projeto do Google (todas as contas conectadas com o mesmo JSON dividem essa cota).
+- **TikTok:** a API não agenda, então o envio acontece no horário (PC e worker ligados).
+
+### Configurar o TikTok (uma vez, grátis)
+
+1. <https://developers.tiktok.com> → **Manage apps** → crie um app.
+2. Adicione os produtos **Login Kit** e **Content Posting API** (ative *Direct Post*).
+3. Escopos: `user.info.basic`, `video.publish`, `video.list`.
+4. Em **Redirect URI**, cadastre a URL que a tela Publicar mostra
+   (`http://127.0.0.1:8000/publicar/tiktok/callback` no padrão).
+5. No `.env`: `CLIPADOR_TIKTOK_CLIENT_KEY=…` e `CLIPADOR_TIKTOK_CLIENT_SECRET=…`, reinicie a web
+   e clique em **Conectar TikTok**.
+
+Até o TikTok **aprovar o app** (pedido de *audit* no portal), os posts saem **só como privados**
+(o Clipador avisa no log). Depois da aprovação, a visibilidade pública funciona.
+
+**Instagram Reels** ainda não: a API da Meta exige o vídeo num link público na internet.
 
 ## Ao vivo (Passo 5E)
 
