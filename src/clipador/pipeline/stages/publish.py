@@ -32,6 +32,15 @@ class PublishStage(Stage):
                 s.add(p)
                 s.commit()
 
+    @staticmethod
+    def _remember_sent(ctx: StageContext, pub_id: int, sent_id: str) -> None:
+        """Save the platform's id right after the upload (before waiting for processing)."""
+        with ctx.session() as s:
+            row = s.get(Publication, pub_id)
+            row.external_id, row.updated_at = sent_id, utcnow()
+            s.add(row)
+            s.commit()
+
     def run(self, ctx: StageContext) -> None:
         settings = ctx.settings
         with ctx.session() as s:
@@ -47,6 +56,9 @@ class PublishStage(Stage):
             if acc.paused:
                 raise ClipadorError(f"A conta {acc.name} está pausada.", retryable=True)
             r = s.get(Render, p.render_id)
+            # An earlier attempt that was interrupted AFTER the upload left its id here: never
+            # upload again (that posts the same video twice), just confirm it on the platform.
+            already_sent = p.external_id if p.status == PublicationStatus.UPLOADING else None
             p.status, p.error, p.updated_at = PublicationStatus.UPLOADING, None, utcnow()
             s.add(p)
             s.commit()
@@ -57,10 +69,19 @@ class PublishStage(Stage):
         size = f"{video.stat().st_size / 1e6:.1f} MB"
         if acc.platform == "tiktok":
             privacy = tiktok.FROM_GENERIC.get(p.privacy, "SELF_ONLY")
-            ctx.log(f"Enviando ao TikTok ({acc.name}, {size})…")
-            publish_id, used = client.upload(
-                video, p.description, privacy, lambda f: ctx.progress(80 * f)
-            )
+            if already_sent:
+                ctx.log(
+                    "O vídeo já tinha sido enviado numa tentativa interrompida: só "
+                    "confirmando no TikTok (não envia de novo)."
+                )
+                publish_id = already_sent
+                used = tiktok.INBOX if settings.tiktok_mode == "inbox" else privacy
+            else:
+                ctx.log(f"Enviando ao TikTok ({acc.name}, {size})…")
+                publish_id, used = client.upload(
+                    video, p.description, privacy, lambda f: ctx.progress(80 * f)
+                )
+                self._remember_sent(ctx, p.id, publish_id)
             if used == tiktok.INBOX:
                 pass
             elif used != privacy:
@@ -95,7 +116,14 @@ class PublishStage(Stage):
                 + (f", público às {publish_at.astimezone():%d/%m %H:%M}" if publish_at else "")
                 + ")…"
             )
-            ext = client.upload(video, meta, lambda f: ctx.progress(99 * f))
+            if already_sent:
+                ctx.log(
+                    "O vídeo já tinha sido enviado numa tentativa interrompida: não envia de novo."
+                )
+                ext = already_sent
+            else:
+                ext = client.upload(video, meta, lambda f: ctx.progress(99 * f))
+                self._remember_sent(ctx, p.id, ext)
             url, privacy_used = f"https://youtube.com/shorts/{ext}", p.privacy
             with ctx.session() as s:
                 row = s.get(Publication, p.id)

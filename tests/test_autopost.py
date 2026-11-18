@@ -454,3 +454,43 @@ def test_tiktok_inbox_mode_uses_video_upload(ysettings, fake_tt, tmp_path):
     _pid, used = client.upload(video, "legenda", "PUBLIC_TO_EVERYONE")
     assert used == tiktok.INBOX and fake_tt.init is not None and "post_info" not in fake_tt.init
     assert fake_tt.uploaded == b"2" * 100
+
+
+def test_interrupted_tiktok_upload_is_not_sent_twice(ysettings, engine, tmp_path, fake_tt):
+    """The worker restarts while TikTok is still processing: the retry must only confirm the
+    publish, never upload the same video again (that posted it twice)."""
+    cid = _approved_with_final(ysettings, engine, tmp_path)
+    with Session(engine) as s:
+        acc = accounts.upsert_account(
+            s,
+            "tiktok",
+            "o1",
+            "fulano.tt",
+            {"access_token": "a", "refresh_token": "r", "expires_at": time.time() + 999},
+        )
+        s.commit()
+        pub = accounts.new_publication(s, acc, s.get(Candidate, cid), 1, privacy="private")
+        pub.status = PublicationStatus.QUEUED
+        s.add(pub)
+        s.commit()
+        pid = pub.id
+    ctx = StageContext(1, "publish", None, {"publication_id": pid}, 1, ysettings, engine, _Rep())
+
+    def boom(*a, **k):
+        raise KeyboardInterrupt  # killed while waiting for TikTok
+
+    real_wait = tiktok.TikTok.wait_published
+    tiktok.TikTok.wait_published = boom
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            PublishStage().run(ctx)
+    finally:
+        tiktok.TikTok.wait_published = real_wait
+    with Session(engine) as s:
+        p = s.get(Publication, pid)
+        assert p.status == PublicationStatus.UPLOADING and p.external_id == "p1"
+    uploads_before = len(fake_tt.uploaded)
+    PublishStage().run(ctx)  # the job resumes
+    assert len(fake_tt.uploaded) == uploads_before  # nothing uploaded again
+    with Session(engine) as s:
+        assert s.get(Publication, pid).status == PublicationStatus.PUBLISHED
