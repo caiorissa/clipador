@@ -229,6 +229,18 @@ class Worker:
         self._watch_thread = threading.Thread(target=work, name="live-watch", daemon=True)
         self._watch_thread.start()
 
+    def _remote_whisper_up(self) -> bool:
+        """Is the other computer's transcription server up? (checked at most every 30 s)"""
+        if not self.settings.remote_whisper_url:
+            return False
+        now = time.monotonic()
+        if now - getattr(self, "_remote_checked", -1e9) > 30:
+            from clipador.services import transcriber as tx
+
+            self._remote_ok = tx.remote_up(self.settings)
+            self._remote_checked = now
+        return self._remote_ok
+
     def _autopost_tick(self) -> None:
         """Auto-post: schedule newly APPROVED clips on each account's grid, upload the due ones."""
         from sqlmodel import Session
@@ -290,6 +302,8 @@ class Worker:
             return False
         if self.settings.llm_backend == "claude":
             queue.release_cloud_ai_from_gpu(self.engine)
+        if self._remote_whisper_up():  # the other computer transcribes: no local GPU needed
+            queue.release_from_gpu(self.engine, ("transcribe", "live_analyze"))
         gpu_free = self.gpu_lock.acquire(blocking=False)
         try:
             job = None

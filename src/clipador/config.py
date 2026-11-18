@@ -48,6 +48,12 @@ class Settings(BaseSettings):
 
     # --- transcription (faster-whisper on CUDA/CPU, mlx-whisper on Apple Silicon) ---
     whisper_backend: str = "auto"  # auto | faster-whisper | mlx (auto = mlx on an M1-M4 Mac)
+    # Share the work: another computer's GPU transcribes (`clipador servir-transcricao` there).
+    # Empty = transcribe here. Falls back to this machine when the other one doesn't answer.
+    remote_whisper_url: str = ""
+    remote_whisper_token: str = ""
+    # On the computer that SERVES transcriptions: fixed token (empty = generated in data/).
+    transcription_server_token: str = ""
     # auto = large-v3-turbo on a Mac (MLX), medium with faster-whisper (fits an 8 GB GPU).
     # Also: small, large-v3-turbo, large-v3 (may not fit 8 GB of VRAM).
     whisper_model: str = "auto"

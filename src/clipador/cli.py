@@ -85,6 +85,20 @@ def _engine(settings: Settings):
     return make_engine(settings)
 
 
+def cmd_transcription_server(settings: Settings, args) -> int:
+    """Run on the computer that lends its GPU (e.g. the Windows PC with an RTX)."""
+    from clipador.services import transcription_server
+
+    overrides = {"remote_whisper_url": ""}  # this machine transcribes itself
+    if args.modelo:
+        overrides["whisper_model"] = args.modelo
+    if args.compute:
+        overrides["whisper_compute_type"] = args.compute
+    settings = settings.model_copy(update=overrides)
+    settings.ensure_dirs()
+    return transcription_server.serve(settings, args.porta)
+
+
 def cmd_live_capture(settings: Settings, args) -> int:
     """Internal: the capture process of one live session (started by the web/worker)."""
     from clipador.services.live_capture import run_capture
@@ -407,6 +421,20 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--model")
     b.add_argument("--compute")
     b.add_argument("--language", default="auto")
+    ts = sub.add_parser(
+        "servir-transcricao", help="empresta a GPU deste computador para outro Clipador transcrever"
+    )
+    ts.add_argument("--porta", type=int, default=8765)
+    ts.add_argument(
+        "--modelo",
+        default="large-v3-turbo",
+        help="modelo do Whisper (padrão large-v3-turbo: rápido e bom numa RTX)",
+    )
+    ts.add_argument(
+        "--compute",
+        default="int8_float16",
+        help="precisão na GPU NVIDIA (int8_float16 economiza VRAM)",
+    )
     lc = sub.add_parser("live-capture", help="(interno) processo de captura de uma live")
     lc.add_argument("live_id", type=int)
     lv = sub.add_parser("live", help="grava e analisa uma live (ou simula uma com um arquivo)")
@@ -423,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.command == "servir-transcricao":
+        return cmd_transcription_server(settings, args)
     if args.command == "live-capture":
         return cmd_live_capture(settings, args)
     if args.command == "live":

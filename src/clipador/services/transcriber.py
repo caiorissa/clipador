@@ -17,6 +17,7 @@ import json
 import logging
 import platform
 import sys
+import threading
 import time
 import unicodedata
 from collections.abc import Callable
@@ -404,11 +405,93 @@ class MlxWhisperTranscriber:
             mx.clear_cache()
 
 
-def make_transcriber(settings: Settings, log_cb: Callable[[str], None]) -> Transcriber:
-    """Factory used by the transcribe stage (tests monkeypatch this)."""
+# --- another computer's GPU (services/transcription_server.py) --------------------------------
+
+_LOCAL_LOCK = threading.Lock()  # remote jobs run in parallel: a local fallback goes one at a time
+_REMOTE_DOWN_UNTIL = [0.0]  # after a failure, skip the remote for a while (no waiting each time)
+
+
+def remote_up(settings: Settings, timeout: float = 3.0) -> bool:
+    """Is the other computer's transcription server answering (and the token right)?"""
+    if not settings.remote_whisper_url or time.monotonic() < _REMOTE_DOWN_UNTIL[0]:
+        return False
+    import httpx
+
+    try:
+        auth = {"Authorization": f"Bearer {settings.remote_whisper_token}"}
+        url = settings.remote_whisper_url.rstrip("/") + "/health"
+        r = httpx.get(url, timeout=timeout, headers=auth)
+        return r.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+class RemoteTranscriber:
+    """Sends each chunk to the transcription server on another computer (e.g. the Windows PC
+    with an RTX). If it doesn't answer, transcribes here instead (and tries the remote again a
+    few minutes later)."""
+
+    device = "remoto"
+    compute_type = "remoto"
+
+    def __init__(self, settings: Settings, log_cb: Callable[[str], None] = log.info):
+        self.settings, self.log_cb = settings, log_cb
+        self.detected_language: str | None = None
+        self._local: Transcriber | None = None
+
+    def transcribe(
+        self, audio_path: Path, language: str | None, progress_cb: Callable[[float], None]
+    ) -> list[Word]:
+        import httpx
+
+        url = self.settings.remote_whisper_url.rstrip("/") + "/transcribe"
+        if time.monotonic() >= _REMOTE_DOWN_UNTIL[0]:
+            t0 = time.monotonic()
+            try:
+                r = httpx.post(url, content=audio_path.read_bytes(),
+                               params={"language": language or ""}, timeout=900,
+                               headers={"Authorization":
+                                        f"Bearer {self.settings.remote_whisper_token}",
+                                        "Content-Type": "audio/wav"})  # fmt: skip
+                if r.status_code == 401:
+                    raise ClipadorError(
+                        "O servidor de transcrição recusou o token. Confira "
+                        "CLIPADOR_REMOTE_WHISPER_TOKEN com o que o PC mostrou."
+                    )
+                r.raise_for_status()
+                data = r.json()
+                self.detected_language = data.get("language")
+                dt = time.monotonic() - t0
+                self.log_cb(f"Transcrito no outro computador em {dt:.0f}s.")
+                progress_cb(1.0)
+                return [Word(float(a), float(b), str(w), float(p)) for a, b, w, p in data["words"]]
+            except (httpx.HTTPError, ValueError, KeyError) as e:
+                _REMOTE_DOWN_UNTIL[0] = time.monotonic() + 300
+                self.log_cb(f"Outro computador indisponível ({type(e).__name__}); "
+                            "transcrevendo aqui.")  # fmt: skip
+        with _LOCAL_LOCK:
+            if self._local is None:
+                self._local = _local_transcriber(self.settings, self.log_cb)
+            words = self._local.transcribe(audio_path, language, progress_cb)
+            self.detected_language = getattr(self._local, "detected_language", None)
+            return words
+
+    def close(self) -> None:
+        if self._local is not None and hasattr(self._local, "close"):
+            self._local.close()
+
+
+def _local_transcriber(settings: Settings, log_cb: Callable[[str], None]) -> Transcriber:
     if resolve_backend(settings) == "mlx":
         return MlxWhisperTranscriber(settings, log_cb)
     return FasterWhisperTranscriber(settings, log_cb)
+
+
+def make_transcriber(settings: Settings, log_cb: Callable[[str], None]) -> Transcriber:
+    """Factory used by the transcribe stage (tests monkeypatch this)."""
+    if settings.remote_whisper_url:
+        return RemoteTranscriber(settings, log_cb)
+    return _local_transcriber(settings, log_cb)
 
 
 def realtime_factor(audio_seconds: float, started_monotonic: float) -> float:

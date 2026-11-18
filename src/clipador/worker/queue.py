@@ -79,6 +79,24 @@ def enqueue(
     return job
 
 
+def release_from_gpu(engine: Engine, job_types: tuple[str, ...]) -> int:
+    """Queued jobs of these types stop waiting for this machine's GPU (their heavy part runs
+    elsewhere: Claude in the cloud, Whisper on the other computer). Returns how many."""
+    with Session(engine) as s:
+        rows = s.exec(
+            select(Job).where(
+                col(Job.type).in_(job_types),
+                Job.status == JobStatus.QUEUED,
+                Job.needs_gpu == True,  # noqa: E712
+            )
+        ).all()
+        for j in rows:
+            j.needs_gpu = False
+            s.add(j)
+        s.commit()
+        return len(rows)
+
+
 def release_cloud_ai_from_gpu(engine: Engine) -> int:
     """With Claude as the AI judge the 'enrich' step runs in the cloud: queued enrich jobs
     don't need the GPU lock (they go in parallel with Whisper). Returns how many changed."""
