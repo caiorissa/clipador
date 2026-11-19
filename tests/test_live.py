@@ -457,7 +457,7 @@ class _FakeYt:
         return []
 
 
-def test_review_shows_each_lives_best_clips_plus_those_above_the_minimum(engine, lsettings):
+def test_review_shows_every_live_clip_best_first(engine, lsettings):
     from clipador.services import review
 
     st = _streamer(engine, handle="minimo")
@@ -471,11 +471,11 @@ def test_review_shows_each_lives_best_clips_plus_those_above_the_minimum(engine,
                             live_session_id=ls.id))  # fmt: skip
         s.commit()
         shown = sorted(c.score for c in review.scope(s, review.ReviewFilters(status="ao_vivo")))
-        # the 5 best of the live (82 is also above the minimum); the weakest 3 stay hidden
-        assert shown == [40.0, 45.0, 50.0, 54.0, 82.0]
+        # all of them: the minimum only drives the automatic clipping
+        assert shown == scores
         assert len(review.scope(s, review.ReviewFilters(status="todos"))) == len(scores)
         stats = live.stats(s, lsettings, s.get(LiveSession, ls.id))
-        assert stats["in_review"] == 5 and stats["candidates"] == 8
+        assert stats["in_review"] == 8 and stats["candidates"] == 8
 
 
 def test_claude_enrich_does_not_wait_for_the_gpu(engine):

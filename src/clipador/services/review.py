@@ -568,25 +568,6 @@ def order_key(order: str):
     return keys.get(order, keys["rank"])
 
 
-LIVE_TOP_N = 5  # the best N pending clips of every live always show up in the review
-
-
-def hidden_live_clips(cands: list[Candidate], mins: dict[int, float]) -> set[int]:
-    """Pending live clips kept out of the review: under the session's 'nota mínima' AND not
-    among the session's best LIVE_TOP_N. So every live shows its best moments, without the
-    hundreds of weak candidates a long live produces."""
-    pending = [c for c in cands if c.live_session_id
-               and c.status in (CandidateStatus.SUGGESTED, CandidateStatus.SKIPPED)]  # fmt: skip
-    by_live: dict[int, list[Candidate]] = {}
-    for c in pending:
-        by_live.setdefault(c.live_session_id, []).append(c)
-    hidden: set[int] = set()
-    for lid, rows in by_live.items():
-        rows.sort(key=lambda c: -_score(c))
-        hidden |= {c.id for c in rows[LIVE_TOP_N:] if _score(c) < mins.get(lid, 0.0)}
-    return hidden
-
-
 def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
     """Candidates of the latest analysis run of each source, filtered by everything but status,
     in queue order."""
@@ -610,22 +591,6 @@ def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
     if f.status == "ao_vivo":
         q = q.where(Candidate.live_session_id != None)  # noqa: E711
     cands = list(session.exec(q).all())
-    if f.status != "todos":  # live clips below their session's minimum score stay out of the way
-        from clipador.models import LiveSession
-
-        ids = {c.live_session_id for c in cands if c.live_session_id}
-        mins = (
-            {
-                ls.id: ls.min_score
-                for ls in session.exec(
-                    select(LiveSession).where(col(LiveSession.id).in_(ids))
-                ).all()
-            }
-            if ids
-            else {}
-        )
-        hidden = hidden_live_clips(cands, mins)
-        cands = [c for c in cands if c.id not in hidden]
     if f.min_score is not None:
         cands = [c for c in cands if _score(c) >= f.min_score]
     key = order_key(f.order)

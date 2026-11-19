@@ -459,11 +459,10 @@ def stats(session: Session, settings: Settings, ls: LiveSession) -> dict[str, An
 
 
 def _in_review(cands: list[Candidate], ls: LiveSession) -> int:
-    """How many of the session's clips the review shows (best few + above the minimum)."""
-    from clipador.services.review import PENDING_STATUSES, hidden_live_clips
+    """How many of the session's clips are waiting in the review (all pending ones)."""
+    from clipador.models import PENDING_STATUSES
 
-    hidden = hidden_live_clips(list(cands), {ls.id: ls.min_score})
-    return sum(1 for c in cands if c.id not in hidden and c.status in PENDING_STATUSES)
+    return sum(1 for c in cands if c.status in PENDING_STATUSES)
 
 
 def _ai_scored(session: Session, ids: list[int]) -> int:
