@@ -126,6 +126,16 @@ def test_undo_restores_feedback_and_range(session, settings, seeded):
 # --- queue ---------------------------------------------------------------------------------------
 
 
+def test_order_nota_ignores_auto_clipped_boost(session, seeded):
+    (a1, a2, a3), (b1, b2) = _ids(seeded)
+    last = session.get(Candidate, b2)  # lowest score
+    last.auto_clipped = True
+    session.add(last)
+    session.flush()
+    assert review.scope(session, ReviewFilters(order="nota"))[0].id != b2
+    assert review.scope(session, ReviewFilters())[0].id == b2  # default keeps live-first
+
+
 def test_queue_order_and_filters(session, seeded):
     (a1, a2, a3), (b1, b2) = _ids(seeded)
     s2 = seeded.sources[1]

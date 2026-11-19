@@ -594,7 +594,7 @@ def scope(session: Session, f: ReviewFilters) -> list[Candidate]:
     if f.min_score is not None:
         cands = [c for c in cands if _score(c) >= f.min_score]
     key = order_key(f.order)
-    if f.order == "horario":
+    if f.order in ("horario", "nota"):  # an explicit order is strict: no live-first boost
         return sorted(cands, key=key)
     # Live moments that crossed the auto-clip score go first: they are the urgent ones.
     return sorted(cands, key=lambda c: (not c.auto_clipped, key(c)))
