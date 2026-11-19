@@ -147,15 +147,22 @@ def apply_auto_clip(s, settings, ls: LiveSession) -> list[Candidate]:
 
     if not ls.auto_clip:
         return []
+
+    def nota(c: Candidate) -> float:
+        return c.final_score if c.final_score is not None else c.score
+
     cands = s.exec(
         select(Candidate).where(
             Candidate.live_session_id == ls.id,
-            Candidate.auto_clipped == False,  # noqa: E712
             col(Candidate.status).in_([CandidateStatus.SUGGESTED, CandidateStatus.SKIPPED]),
         )
     ).all()
-    hits = [c for c in cands if (c.final_score if c.final_score is not None else c.score)
-            >= ls.min_score]  # fmt: skip
+    for c in cands:  # flagged on the raw detection score, then the AI/rerank lowered it
+        if c.auto_clipped and nota(c) < ls.min_score:
+            c.auto_clipped = False
+            c.updated_at = utcnow()
+            s.add(c)
+    hits = [c for c in cands if not c.auto_clipped and nota(c) >= ls.min_score]
     for c in hits:
         c.auto_clipped = True
         c.updated_at = utcnow()
